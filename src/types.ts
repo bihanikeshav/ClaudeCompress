@@ -1,4 +1,4 @@
-export type TrimMode = "ultra" | "redact" | "truncate";
+export type TrimMode = "ultra" | "redact" | "truncate" | "smart";
 
 export interface TrimOptions {
   mode: TrimMode;

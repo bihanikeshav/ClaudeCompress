@@ -9,10 +9,45 @@ import {
   listSessions,
   projectDirForCwd,
   humanBytes,
+  staleness,
+  type CacheState,
 } from "./paths.ts";
-import { analyze, summarizeSession } from "./analyzer.ts";
+import { analyze, estimateSessionTokens, summarizeSession } from "./analyzer.ts";
 import { trimSession } from "./trimmer.ts";
 import type { TrimMode, TrimOptions } from "./types.ts";
+import {
+  MODELS,
+  estimateColdResumeCost,
+  findModel,
+  formatUSD,
+  type ModelInfo,
+} from "./pricing.ts";
+import { recordTrim, summarizeHistory, readHistory } from "./history.ts";
+
+function cacheTag(state: CacheState, label: string): string {
+  if (state === "warm") return pc.red(`warm · ${label}`);
+  if (state === "cold") return pc.yellow(`cold · ${label}`);
+  return pc.green(`cold · ${label}`);
+}
+
+async function pickModel(): Promise<ModelInfo | null> {
+  const choice = await p.select({
+    message: "Which Claude model are you using?",
+    initialValue: "claude-opus-4-7",
+    options: MODELS.map((m) => ({
+      value: m.id,
+      label: `${m.label}  ${pc.dim(`$${m.inputPerMillion}/M input`)}`,
+    })),
+  });
+  if (p.isCancel(choice)) return null;
+  return findModel(choice as string);
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
 
 function preview(s: string, max = 70): string {
   const oneline = s.replace(/\s+/g, " ").trim();
@@ -84,13 +119,15 @@ async function pickSession(projectDir: string): Promise<string | null> {
   }
 
   const sessionInfos = sessions.slice(0, 25).map((path) => summarizeSession(path));
+  const latest = sessionInfos[0]!;
+  const latestStale = staleness(latest.mtime);
 
   const choice = await p.select({
     message: "Which session?",
     options: [
       {
-        value: sessionInfos[0]!.path,
-        label: `${pc.green("Latest")}  ${pc.dim(humanBytes(sessionInfos[0]!.bytes))}  ${pc.dim(preview(sessionInfos[0]!.firstUserMessage, 50))}`,
+        value: latest.path,
+        label: `${pc.green("Latest")}  ${pc.dim(humanBytes(latest.bytes))}  ${cacheTag(latestStale.state, latestStale.label)}  ${pc.dim(preview(latest.firstUserMessage, 45))}`,
       },
       { value: "__browse__", label: "Browse all sessions" },
     ],
@@ -100,10 +137,13 @@ async function pickSession(projectDir: string): Promise<string | null> {
 
   const picked = await p.select({
     message: "Pick a session",
-    options: sessionInfos.map((s) => ({
-      value: s.path,
-      label: `${humanBytes(s.bytes).padStart(9)}  ${pc.dim(s.sessionId.slice(0, 8))}  ${preview(s.firstUserMessage, 55)}`,
-    })),
+    options: sessionInfos.map((s) => {
+      const st = staleness(s.mtime);
+      return {
+        value: s.path,
+        label: `${humanBytes(s.bytes).padStart(9)}  ${cacheTag(st.state, st.label).padEnd(22)}  ${pc.dim(preview(s.firstUserMessage, 50))}`,
+      };
+    }),
   });
   if (p.isCancel(picked)) return null;
   return picked as string;
@@ -114,16 +154,20 @@ async function pickMode(): Promise<TrimOptions | null> {
     message: "How aggressive?",
     options: [
       {
+        value: "smart",
+        label: `${pc.magenta("Smart")}    ${pc.dim("per-tool rules — head/tail Read/Bash, keep small state, redact fetches")}`,
+      },
+      {
         value: "ultra",
-        label: `${pc.green("Ultra")}   ${pc.dim("dialog only — smallest, breaks tool replay")}`,
+        label: `${pc.green("Ultra")}    ${pc.dim("dialog only — smallest, breaks tool replay")}`,
       },
       {
         value: "redact",
-        label: `${pc.yellow("Redact")}  ${pc.dim("drop tool_result bodies, keep structure")}`,
+        label: `${pc.yellow("Redact")}   ${pc.dim("drop all tool_result bodies, keep structure")}`,
       },
       {
         value: "truncate",
-        label: `${pc.cyan("Truncate")} ${pc.dim("keep first N chars of each tool_result")}`,
+        label: `${pc.cyan("Truncate")} ${pc.dim("keep first N chars of every tool_result")}`,
       },
     ],
   });
@@ -145,15 +189,88 @@ async function pickMode(): Promise<TrimOptions | null> {
   return { mode: mode as TrimMode };
 }
 
+function printHistorySummary(): void {
+  const summary = summarizeHistory();
+  if (summary.count === 0) return;
+  console.log(
+    pc.dim(
+      `Lifetime: ${summary.count} trim${summary.count === 1 ? "" : "s"} · saved ≈ ${formatUSD(summary.costSaved)} (${formatTokens(summary.tokensSaved)} tokens)`,
+    ),
+  );
+  console.log();
+}
+
+async function runHistory(): Promise<void> {
+  const events = readHistory();
+  if (events.length === 0) {
+    console.log(pc.dim("No trim history yet. Run claudecompress first."));
+    return;
+  }
+  console.log(pc.bold(`claudecompress history · ${events.length} event${events.length === 1 ? "" : "s"}`));
+  console.log();
+  console.log(
+    `${"when".padEnd(20)}${"mode".padEnd(10)}${"model".padEnd(12)}${"saved".padStart(9)}${"tokens".padStart(12)}`,
+  );
+  console.log("-".repeat(63));
+  const recent = events.slice(-20).reverse();
+  for (const e of recent) {
+    const when = new Date(e.timestamp).toISOString().slice(0, 16).replace("T", " ");
+    const saved = formatUSD(Math.max(0, e.costBefore - e.costAfter));
+    const tks = formatTokens(Math.max(0, e.tokensBefore - e.tokensAfter));
+    console.log(
+      `${when.padEnd(20)}${e.mode.padEnd(10)}${(e.model.replace("claude-", "")).padEnd(12)}${saved.padStart(9)}${tks.padStart(12)}`,
+    );
+  }
+  const summary = summarizeHistory(events);
+  console.log();
+  console.log(
+    pc.bold("total saved ≈ ") +
+      pc.green(formatUSD(summary.costSaved)) +
+      pc.dim(`  (${formatTokens(summary.tokensSaved)} tokens across ${summary.count} trims)`),
+  );
+}
+
 async function main() {
+  const [, , sub] = process.argv;
+  if (sub === "history") {
+    await runHistory();
+    return;
+  }
+
   console.clear();
   p.intro(pc.bgCyan(pc.black(" claudecompress ")));
+  printHistorySummary();
+
+  const model = await pickModel();
+  if (!model) return p.cancel("Aborted.");
 
   const project = await pickProject();
   if (!project) return p.cancel("Aborted.");
 
   const session = await pickSession(project);
   if (!session) return p.cancel("Aborted.");
+
+  const sessionInfo = summarizeSession(session);
+  const stale = staleness(sessionInfo.mtime);
+  const beforeTokens = estimateSessionTokens(session, model);
+  const beforeCost = estimateColdResumeCost(beforeTokens, model);
+
+  console.log();
+  console.log(
+    `${pc.dim("Last activity:")} ${stale.label}  ${pc.dim("·")}  ${cacheTag(stale.state, stale.state === "warm" ? "cache likely warm" : "cache expired")}`,
+  );
+  console.log(
+    `${pc.dim("Replay cost estimate")} ${pc.dim("(" + model.label + ", cold /resume):")} ${pc.bold(formatTokens(beforeTokens) + " tokens")}  ${pc.dim("≈")}  ${pc.bold(formatUSD(beforeCost))}`,
+  );
+  if (stale.state === "warm") {
+    console.log(
+      pc.yellow(
+        "  ⚠  Prompt cache is probably still live. Compressing now would invalidate it\n" +
+          "     and cost more than you save. Only proceed if you know you're done with this\n" +
+          "     session and want to resume cold later.",
+      ),
+    );
+  }
 
   const before = analyze(session);
   printReport("Before", before);
@@ -162,8 +279,11 @@ async function main() {
   if (!opts) return p.cancel("Aborted.");
 
   const confirm = await p.confirm({
-    message: `Write a stripped copy alongside ${basename(session)}?`,
-    initialValue: true,
+    message:
+      stale.state === "warm"
+        ? `Cache is warm. Trim anyway?`
+        : `Write a stripped copy alongside ${basename(session)}?`,
+    initialValue: stale.state !== "warm",
   });
   if (p.isCancel(confirm) || !confirm) return p.cancel("Aborted.");
 
@@ -175,10 +295,32 @@ async function main() {
   const after = analyze(outPath);
   printReport("After", after);
 
+  const afterTokens = estimateSessionTokens(outPath, model);
+  const afterCost = estimateColdResumeCost(afterTokens, model);
+  const savedTokens = Math.max(0, beforeTokens - afterTokens);
+  const savedCost = Math.max(0, beforeCost - afterCost);
+
+  recordTrim({
+    timestamp: new Date().toISOString(),
+    mode: opts.mode,
+    model: model.id,
+    sourcePath: session,
+    outputPath: outPath,
+    bytesBefore: before.bytes,
+    bytesAfter: after.bytes,
+    tokensBefore: beforeTokens,
+    tokensAfter: afterTokens,
+    costBefore: beforeCost,
+    costAfter: afterCost,
+  });
+
   const ratio = ((100 * after.bytes) / (before.bytes || 1)).toFixed(1);
   console.log();
   console.log(
     `${pc.bold("before")} ${humanBytes(before.bytes)}  →  ${pc.bold("after")} ${humanBytes(after.bytes)}  ${pc.dim(`(${ratio}% of original)`)}`,
+  );
+  console.log(
+    `${pc.bold("tokens")} ${formatTokens(beforeTokens)}  →  ${formatTokens(afterTokens)}  ${pc.dim("·")}  ${pc.bold("cold /resume")} ${formatUSD(beforeCost)}  →  ${formatUSD(afterCost)}  ${pc.green(`(saved ≈ ${formatUSD(savedCost)} / ${formatTokens(savedTokens)} tokens)`)}`,
   );
   console.log();
   console.log(pc.bold("New session hash:"));
@@ -186,6 +328,14 @@ async function main() {
   console.log();
   console.log(pc.dim("Resume with:  ") + "claude --resume");
   console.log(pc.dim("Then send a ") + pc.bold("`hi`") + pc.dim(" to force /context to recompute."));
+  console.log();
+  console.log(
+    pc.dim("Tip: a good moment to run ") +
+      pc.bold("claudecompress") +
+      pc.dim(" is right after you type ") +
+      pc.bold("/clear") +
+      pc.dim(" in an active session — the cache is about to go cold anyway."),
+  );
 
   p.outro(pc.green("Done."));
 }

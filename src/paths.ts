@@ -64,6 +64,33 @@ export function listSessions(projectDir: string): string[] {
   return files.map((f) => f.path);
 }
 
+export type CacheState = "warm" | "cold" | "very-cold";
+
+export interface Staleness {
+  minutesAgo: number;
+  state: CacheState;
+  label: string;
+}
+
+export function staleness(mtime: Date, now: Date = new Date()): Staleness {
+  const minutesAgo = Math.max(0, (now.getTime() - mtime.getTime()) / 60000);
+  let state: CacheState;
+  if (minutesAgo < 5) state = "warm";
+  else if (minutesAgo < 60) state = "cold";
+  else state = "very-cold";
+
+  const label = formatAge(minutesAgo);
+  return { minutesAgo, state, label };
+}
+
+function formatAge(minutes: number): string {
+  if (minutes < 1) return `${Math.round(minutes * 60)}s ago`;
+  if (minutes < 60) return `${Math.round(minutes)}m ago`;
+  const hours = minutes / 60;
+  if (hours < 24) return `${hours.toFixed(1)}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
 export function humanBytes(n: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
