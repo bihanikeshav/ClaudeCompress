@@ -21,7 +21,7 @@ Interactive CLI: picks a project, shows each session's size + cache staleness + 
 | Situation | Use it? |
 |---|---|
 | Back after a break (5+ min), big session, about to `/resume` | ✅ yes |
-| Right after you type `/clear` | ✅ yes — cache is about to go cold anyway |
+| Claude Code suggests `/clear` (context pressure) | ✅ yes — trim instead so you keep the thread |
 | Actively mid-session, cache warm | ❌ no — you'd invalidate the live cache |
 | Small session (< 100k tokens) | ⚪ skip — not worth it |
 
