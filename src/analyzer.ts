@@ -1,6 +1,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import type { SizeReport, SessionSummary } from "./types.ts";
+import { estimateTokens, type ModelInfo } from "./pricing.ts";
 
 const BUCKET_META_TYPES = new Set([
   "file-history-snapshot",
@@ -85,6 +86,62 @@ function extractFirstUserMessage(path: string): string {
     }
   }
   return "(no user message found)";
+}
+
+/**
+ * Count chars of content that would actually be replayed to the API on /resume.
+ * Skips JSONL framing, metadata records, and non-API-visible fields.
+ */
+export function apiRelevantChars(path: string): number {
+  let chars = 0;
+  const data = readFileSync(path, "utf8");
+  for (const line of data.split("\n")) {
+    if (!line) continue;
+    let rec: any;
+    try {
+      rec = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const t = rec?.type;
+    if (t !== "user" && t !== "assistant") continue;
+    const msg = rec?.message;
+    if (!msg || typeof msg !== "object") continue;
+    const c = msg.content;
+    if (typeof c === "string") {
+      chars += c.length;
+      continue;
+    }
+    if (Array.isArray(c)) {
+      for (const b of c) {
+        if (!b || typeof b !== "object") continue;
+        const kind = b.type;
+        if (kind === "text") chars += (b.text ?? "").length;
+        else if (kind === "thinking") chars += (b.thinking ?? "").length;
+        else if (kind === "tool_use") {
+          chars += (b.name ?? "").length;
+          try {
+            chars += JSON.stringify(b.input ?? {}).length;
+          } catch {
+            // ignore
+          }
+        } else if (kind === "tool_result") {
+          const tc = b.content;
+          if (typeof tc === "string") chars += tc.length;
+          else if (Array.isArray(tc)) {
+            for (const sb of tc) {
+              if (sb?.type === "text") chars += (sb.text ?? "").length;
+            }
+          }
+        }
+      }
+    }
+  }
+  return chars;
+}
+
+export function estimateSessionTokens(path: string, model: ModelInfo): number {
+  return estimateTokens(apiRelevantChars(path), model);
 }
 
 export function summarizeSession(path: string): SessionSummary {

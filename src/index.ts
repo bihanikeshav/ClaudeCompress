@@ -12,14 +12,40 @@ import {
   staleness,
   type CacheState,
 } from "./paths.ts";
-import { analyze, summarizeSession } from "./analyzer.ts";
+import { analyze, estimateSessionTokens, summarizeSession } from "./analyzer.ts";
 import { trimSession } from "./trimmer.ts";
 import type { TrimMode, TrimOptions } from "./types.ts";
+import {
+  MODELS,
+  estimateColdResumeCost,
+  findModel,
+  formatUSD,
+  type ModelInfo,
+} from "./pricing.ts";
 
 function cacheTag(state: CacheState, label: string): string {
   if (state === "warm") return pc.red(`warm · ${label}`);
   if (state === "cold") return pc.yellow(`cold · ${label}`);
   return pc.green(`cold · ${label}`);
+}
+
+async function pickModel(): Promise<ModelInfo | null> {
+  const choice = await p.select({
+    message: "Which Claude model are you using?",
+    initialValue: "claude-opus-4-7",
+    options: MODELS.map((m) => ({
+      value: m.id,
+      label: `${m.label}  ${pc.dim(`$${m.inputPerMillion}/M input`)}`,
+    })),
+  });
+  if (p.isCancel(choice)) return null;
+  return findModel(choice as string);
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
 }
 
 function preview(s: string, max = 70): string {
@@ -162,6 +188,9 @@ async function main() {
   console.clear();
   p.intro(pc.bgCyan(pc.black(" claudecompress ")));
 
+  const model = await pickModel();
+  if (!model) return p.cancel("Aborted.");
+
   const project = await pickProject();
   if (!project) return p.cancel("Aborted.");
 
@@ -170,9 +199,15 @@ async function main() {
 
   const sessionInfo = summarizeSession(session);
   const stale = staleness(sessionInfo.mtime);
+  const beforeTokens = estimateSessionTokens(session, model);
+  const beforeCost = estimateColdResumeCost(beforeTokens, model);
+
   console.log();
   console.log(
     `${pc.dim("Last activity:")} ${stale.label}  ${pc.dim("·")}  ${cacheTag(stale.state, stale.state === "warm" ? "cache likely warm" : "cache expired")}`,
+  );
+  console.log(
+    `${pc.dim("Replay cost estimate")} ${pc.dim("(" + model.label + ", cold /resume):")} ${pc.bold(formatTokens(beforeTokens) + " tokens")}  ${pc.dim("≈")}  ${pc.bold(formatUSD(beforeCost))}`,
   );
   if (stale.state === "warm") {
     console.log(
@@ -207,10 +242,18 @@ async function main() {
   const after = analyze(outPath);
   printReport("After", after);
 
+  const afterTokens = estimateSessionTokens(outPath, model);
+  const afterCost = estimateColdResumeCost(afterTokens, model);
+  const savedTokens = Math.max(0, beforeTokens - afterTokens);
+  const savedCost = Math.max(0, beforeCost - afterCost);
+
   const ratio = ((100 * after.bytes) / (before.bytes || 1)).toFixed(1);
   console.log();
   console.log(
     `${pc.bold("before")} ${humanBytes(before.bytes)}  →  ${pc.bold("after")} ${humanBytes(after.bytes)}  ${pc.dim(`(${ratio}% of original)`)}`,
+  );
+  console.log(
+    `${pc.bold("tokens")} ${formatTokens(beforeTokens)}  →  ${formatTokens(afterTokens)}  ${pc.dim("·")}  ${pc.bold("cold /resume")} ${formatUSD(beforeCost)}  →  ${formatUSD(afterCost)}  ${pc.green(`(saved ≈ ${formatUSD(savedCost)} / ${formatTokens(savedTokens)} tokens)`)}`,
   );
   console.log();
   console.log(pc.bold("New session hash:"));
@@ -218,6 +261,14 @@ async function main() {
   console.log();
   console.log(pc.dim("Resume with:  ") + "claude --resume");
   console.log(pc.dim("Then send a ") + pc.bold("`hi`") + pc.dim(" to force /context to recompute."));
+  console.log();
+  console.log(
+    pc.dim("Tip: a good moment to run ") +
+      pc.bold("claudecompress") +
+      pc.dim(" is right after you type ") +
+      pc.bold("/clear") +
+      pc.dim(" in an active session — the cache is about to go cold anyway."),
+  );
 
   p.outro(pc.green("Done."));
 }
