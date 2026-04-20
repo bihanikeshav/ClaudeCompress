@@ -23,16 +23,17 @@ The CLI flags cache state per-session (`warm`, `cold`, `very-cold`) from JSONL m
 
 Four modes, pick at runtime:
 
-| Mode | Keeps | Drops | Size ratio |
-|---|---|---|---|
-| **Smart** (default) | per-tool rules — head/tail for `Read`/`Bash`, full for `Edit`/`TodoWrite`, redact for `WebFetch` / MCP Playwright | everything else blanket-redacted | ~60–70% |
-| **Ultra** | user + assistant text turns | tool calls, results, thinking, attachments | 3–10% |
-| **Redact** | full structure, tool names + inputs | tool-result bodies (blanket) | 60–70% |
-| **Truncate N** | structure + first N chars of each tool_result | the rest | tunable |
+| Mode | Weight | Behavior |
+|---|---|---|
+| **Redact** (default) | medium | drop all tool_result bodies, keep full structure |
+| **Smart** | light | per-tool rules — head/tail for `Read`/`Bash`, keep `Edit`/`TodoWrite`, redact `WebFetch` / MCP Playwright |
+| **Ultra** | heavy | user + assistant text turns only; tool calls, results, thinking all dropped |
+| **Truncate N** | manual | keep first N chars of every tool_result |
 
-Smart preserves *signal* (you still see the file you read, errors at the end of a Bash run, what's in your TodoWrite) while cutting bulk. Ultra and Redact are more aggressive; Truncate is the manual knob.
-
-Real example on a 35 MB / 777k-token Opus session → **Ultra: 1.2 MB / 115k tokens** (~$9.93 saved), **Smart: 23 MB / 628k tokens** (~$2.00 saved, full tool-trail context preserved).
+Real example on a 35 MB / 777k-token Opus session →
+- **Redact**: 23 MB / 504k tokens (~$4 saved)
+- **Smart**: 23 MB / 628k tokens (~$2 saved, tool-trail context preserved)
+- **Ultra**: 1.2 MB / 115k tokens (~$9.93 saved, dialog only)
 
 ## Stack fit
 

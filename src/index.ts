@@ -152,22 +152,23 @@ async function pickSession(projectDir: string): Promise<string | null> {
 async function pickMode(): Promise<TrimOptions | null> {
   const mode = await p.select({
     message: "How aggressive?",
+    initialValue: "redact",
     options: [
       {
+        value: "redact",
+        label: `${pc.yellow("Redact")}   ${pc.dim("medium — drop all tool_result bodies, keep structure  [default]")}`,
+      },
+      {
         value: "smart",
-        label: `${pc.magenta("Smart")}    ${pc.dim("per-tool rules — head/tail Read/Bash, keep small state, redact fetches")}`,
+        label: `${pc.magenta("Smart")}    ${pc.dim("light — per-tool rules, preserves Read heads, Bash errors, TodoWrite")}`,
       },
       {
         value: "ultra",
-        label: `${pc.green("Ultra")}    ${pc.dim("dialog only — smallest, breaks tool replay")}`,
-      },
-      {
-        value: "redact",
-        label: `${pc.yellow("Redact")}   ${pc.dim("drop all tool_result bodies, keep structure")}`,
+        label: `${pc.green("Ultra")}    ${pc.dim("heavy — dialog only; tool calls, results, thinking all dropped")}`,
       },
       {
         value: "truncate",
-        label: `${pc.cyan("Truncate")} ${pc.dim("keep first N chars of every tool_result")}`,
+        label: `${pc.cyan("Truncate")} ${pc.dim("manual — keep first N chars of every tool_result")}`,
       },
     ],
   });
