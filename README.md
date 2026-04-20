@@ -3,7 +3,7 @@
 Shrink Claude Code session transcripts so `/resume` on long conversations doesn't cost you a full cache-miss rebuild.
 
 ```
-bunx claudecompress
+bunx cccompress
 ```
 
 Interactive CLI — picks your project, lists sessions, shows a size breakdown, asks how aggressively to trim, and writes a stripped copy alongside the original. Your source JSONL is never modified.
@@ -27,7 +27,7 @@ Ultra gives the biggest win but loses the ability to reference past file reads /
 ## Usage
 
 ```bash
-bunx claudecompress
+bunx cccompress
 ```
 
 Or from a clone:
@@ -39,7 +39,7 @@ bun install
 bun run src/index.ts
 ```
 
-Output is a new `.jsonl` in the same project dir with a fresh session UUID. In `/resume` it shows up prefixed with `[TRIMMED by claudecompress]` so you can tell it apart from the original.
+Output is a new `.jsonl` in the same project dir with a fresh session UUID. In `/resume` it shows up prefixed with `[TRIMMED by cccompress]` so you can tell it apart from the original.
 
 **One gotcha:** `/context` may display a cached value from the source session for the first render. Send any message (e.g. `hi`) and it recomputes against the actual trimmed content.
 
@@ -65,7 +65,7 @@ Tool results dominate almost every real session. That's the fat you're paying to
 - For each block type, applies the chosen transform.
 - Generates a fresh `sessionId` UUID so the new file lives alongside the original — nothing is overwritten.
 - In Ultra mode, rewires `parentUuid` chains across dropped records so the thread stays internally consistent.
-- Prepends `[TRIMMED by claudecompress]` to the first user message so it's visually distinct in `/resume`.
+- Prepends `[TRIMMED by cccompress]` to the first user message so it's visually distinct in `/resume`.
 
 ## License
 

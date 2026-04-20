@@ -1,10 +1,10 @@
 {
-  "name": "claudecompress",
+  "name": "cccompress",
   "version": "0.1.0",
   "description": "Analyze and shrink Claude Code session transcripts so /resume loads faster and cheaper.",
   "type": "module",
   "bin": {
-    "claudecompress": "./src/index.ts"
+    "cccompress": "./src/index.ts"
   },
   "scripts": {
     "start": "bun run src/index.ts",

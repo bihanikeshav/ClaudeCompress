@@ -147,7 +147,7 @@ async function pickMode(): Promise<TrimOptions | null> {
 
 async function main() {
   console.clear();
-  p.intro(pc.bgCyan(pc.black(" claudecompress ")));
+  p.intro(pc.bgCyan(pc.black(" cccompress ")));
 
   const project = await pickProject();
   if (!project) return p.cancel("Aborted.");

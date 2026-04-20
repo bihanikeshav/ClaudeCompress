@@ -4,9 +4,9 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TrimOptions } from "./types.ts";
 
-const TRIM_MARKER = "[TRIMMED by claudecompress] ";
-const IMAGE_PLACEHOLDER = "[image stripped by claudecompress]";
-const REDACT_PLACEHOLDER = "[tool response redacted by claudecompress]";
+const TRIM_MARKER = "[TRIMMED by cccompress] ";
+const IMAGE_PLACEHOLDER = "[image stripped by cccompress]";
+const REDACT_PLACEHOLDER = "[tool response redacted by cccompress]";
 
 function redactToolResult(blk: any): any {
   const out: Record<string, unknown> = {
@@ -26,7 +26,7 @@ function truncateToolResult(blk: any, maxChars: number): any {
         ...blk,
         content:
           content.slice(0, maxChars) +
-          `\n\n[... ${content.length - maxChars} chars trimmed by claudecompress]`,
+          `\n\n[... ${content.length - maxChars} chars trimmed by cccompress]`,
       };
     }
     return blk;
