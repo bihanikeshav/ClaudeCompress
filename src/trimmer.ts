@@ -1,0 +1,184 @@
+import { createReadStream, createWriteStream } from "node:fs";
+import { createInterface } from "node:readline";
+import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
+import type { TrimOptions } from "./types.ts";
+
+const TRIM_MARKER = "[TRIMMED by claudecompress] ";
+const IMAGE_PLACEHOLDER = "[image stripped by claudecompress]";
+const REDACT_PLACEHOLDER = "[tool response redacted by claudecompress]";
+
+function redactToolResult(blk: any): any {
+  const out: Record<string, unknown> = {
+    type: "tool_result",
+    tool_use_id: blk.tool_use_id,
+    content: REDACT_PLACEHOLDER,
+  };
+  if (blk.is_error) out.is_error = true;
+  return out;
+}
+
+function truncateToolResult(blk: any, maxChars: number): any {
+  const content = blk.content;
+  if (typeof content === "string") {
+    if (content.length > maxChars) {
+      return {
+        ...blk,
+        content:
+          content.slice(0, maxChars) +
+          `\n\n[... ${content.length - maxChars} chars trimmed by claudecompress]`,
+      };
+    }
+    return blk;
+  }
+  if (Array.isArray(content)) {
+    const newList = content.map((b: any) => {
+      if (!b || typeof b !== "object") return b;
+      if (b.type === "text" && typeof b.text === "string" && b.text.length > maxChars) {
+        return {
+          ...b,
+          text:
+            b.text.slice(0, maxChars) +
+            `\n\n[... ${b.text.length - maxChars} chars trimmed]`,
+        };
+      }
+      if (b.type === "image") {
+        return { type: "text", text: IMAGE_PLACEHOLDER };
+      }
+      return b;
+    });
+    return { ...blk, content: newList };
+  }
+  return blk;
+}
+
+function stripImage(): any {
+  return { type: "text", text: IMAGE_PLACEHOLDER };
+}
+
+function trimRecordRedact(rec: any, newSid: string, keepChars?: number): any | null {
+  const out = { ...rec };
+  if ("sessionId" in out) out.sessionId = newSid;
+  const msg = out.message;
+  if (msg && typeof msg === "object" && Array.isArray(msg.content)) {
+    const newContent = msg.content.map((blk: any) => {
+      if (!blk || typeof blk !== "object") return blk;
+      if (blk.type === "tool_result") {
+        return keepChars === undefined
+          ? redactToolResult(blk)
+          : truncateToolResult(blk, keepChars);
+      }
+      if (blk.type === "image") return stripImage();
+      return blk;
+    });
+    out.message = { ...msg, content: newContent };
+  }
+  return out;
+}
+
+function ultraTrimRecord(rec: any, newSid: string): any | null {
+  const t = rec?.type;
+  if (t !== "user" && t !== "assistant") return null;
+  const msg = rec?.message;
+  if (!msg || typeof msg !== "object") return null;
+  const c = msg.content;
+  let newContent: unknown;
+  if (typeof c === "string") {
+    if (!c.trim()) return null;
+    newContent = c;
+  } else if (Array.isArray(c)) {
+    const kept = [];
+    for (const b of c) {
+      if (b?.type === "text" && typeof b.text === "string" && b.text.trim()) {
+        kept.push({ type: "text", text: b.text });
+      }
+    }
+    if (kept.length === 0) return null;
+    newContent = kept;
+  } else {
+    return null;
+  }
+  const out = { ...rec, sessionId: newSid, message: { ...msg, content: newContent } };
+  return out;
+}
+
+function markFirstUser(rec: any): any {
+  if (rec?.type !== "user") return rec;
+  const msg = rec.message;
+  if (!msg) return rec;
+  const c = msg.content;
+  const copy = { ...rec, message: { ...msg } };
+  if (typeof c === "string") {
+    copy.message.content = TRIM_MARKER + c;
+    return copy;
+  }
+  if (Array.isArray(c)) {
+    const newList: any[] = [];
+    let injected = false;
+    for (const b of c) {
+      if (!injected && b?.type === "text") {
+        newList.push({ ...b, text: TRIM_MARKER + (b.text ?? "") });
+        injected = true;
+      } else {
+        newList.push(b);
+      }
+    }
+    if (!injected) {
+      newList.unshift({ type: "text", text: TRIM_MARKER.trim() });
+    }
+    copy.message.content = newList;
+    return copy;
+  }
+  return copy;
+}
+
+export async function trimSession(
+  inputPath: string,
+  opts: TrimOptions,
+): Promise<string> {
+  const newSid = randomUUID();
+  const outPath = join(dirname(inputPath), `${newSid}.jsonl`);
+
+  const rl = createInterface({
+    input: createReadStream(inputPath, { encoding: "utf8" }),
+    crlfDelay: Infinity,
+  });
+  const outStream = createWriteStream(outPath, { encoding: "utf8" });
+
+  let marked = false;
+  let lastKeptUuid: string | null = null;
+
+  for await (const line of rl) {
+    if (!line) continue;
+    let rec: any;
+    try {
+      rec = JSON.parse(line);
+    } catch {
+      if (opts.mode !== "ultra") outStream.write(line + "\n");
+      continue;
+    }
+    let newRec: any | null;
+    if (opts.mode === "ultra") {
+      newRec = ultraTrimRecord(rec, newSid);
+      if (!newRec) continue;
+      newRec.parentUuid = lastKeptUuid;
+      lastKeptUuid = newRec.uuid ?? lastKeptUuid;
+    } else {
+      newRec = trimRecordRedact(
+        rec,
+        newSid,
+        opts.mode === "truncate" ? opts.keepChars : undefined,
+      );
+      if (!newRec) continue;
+    }
+    if (!marked && newRec.type === "user") {
+      newRec = markFirstUser(newRec);
+      marked = true;
+    }
+    outStream.write(JSON.stringify(newRec) + "\n");
+  }
+  await new Promise<void>((resolve, reject) => {
+    outStream.end((err?: Error | null) => (err ? reject(err) : resolve()));
+  });
+  return outPath;
+}
