@@ -21,19 +21,24 @@ The CLI flags cache state per-session (`warm`, `cold`, `very-cold`) from JSONL m
 
 ## What it does
 
-Four modes, pick at runtime:
+Five modes, pick at runtime:
 
 | Mode | Weight | Behavior |
 |---|---|---|
 | **Redact** (default) | medium | drop all tool_result bodies, keep full structure |
+| **Recency N** | medium | keep the last N turns verbatim (tool_results and all), redact older turns |
 | **Smart** | light | per-tool rules — head/tail for `Read`/`Bash`, keep `Edit`/`TodoWrite`, redact `WebFetch` / MCP Playwright |
 | **Ultra** | heavy | user + assistant text turns only; tool calls, results, thinking all dropped |
 | **Truncate N** | manual | keep first N chars of every tool_result |
 
-Real example on a 35 MB / 777k-token Opus session →
-- **Redact**: 23 MB / 504k tokens (~$4 saved)
-- **Smart**: 23 MB / 628k tokens (~$2 saved, tool-trail context preserved)
-- **Ultra**: 1.2 MB / 115k tokens (~$9.93 saved, dialog only)
+**Recency** is the pragmatic default for "I want to continue working" — old context gets dropped but your last ~15 turns stay intact with their full tool output, so you can pick right back up.
+
+**Drop-thinking toggle:** any non-Ultra mode can additionally drop `thinking` blocks. Often ~250k tokens saved on a long session with extended thinking, and thinking is never replayed meaningfully on resume.
+
+Real example on a 35 MB / 760k-token Opus session ($11.41 cold):
+- **Redact**: 23 MB / 504k tokens — $7.56 (saved $3.85)
+- **Recency 15**: 23 MB / 501k tokens — $7.52 (saved $3.89, last 15 turns kept in full)
+- **Ultra**: 1.2 MB / 115k tokens — $1.73 (saved $9.68, dialog only)
 
 ## Stack fit
 

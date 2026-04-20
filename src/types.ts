@@ -1,8 +1,10 @@
-export type TrimMode = "ultra" | "redact" | "truncate" | "smart";
+export type TrimMode = "ultra" | "redact" | "truncate" | "smart" | "recency";
 
 export interface TrimOptions {
   mode: TrimMode;
   keepChars?: number;
+  keepLastN?: number;
+  dropThinking?: boolean;
 }
 
 export interface SizeReport {

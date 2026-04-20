@@ -159,6 +159,10 @@ async function pickMode(): Promise<TrimOptions | null> {
         label: `${pc.yellow("Redact")}   ${pc.dim("medium — drop all tool_result bodies, keep structure  [default]")}`,
       },
       {
+        value: "recency",
+        label: `${pc.blue("Recency")}  ${pc.dim("keep last N turns verbatim, redact older")}`,
+      },
+      {
         value: "smart",
         label: `${pc.magenta("Smart")}    ${pc.dim("light — per-tool rules, preserves Read heads, Bash errors, TodoWrite")}`,
       },
@@ -174,6 +178,8 @@ async function pickMode(): Promise<TrimOptions | null> {
   });
   if (p.isCancel(mode)) return null;
 
+  let baseOpts: TrimOptions = { mode: mode as TrimMode };
+
   if (mode === "truncate") {
     const raw = await p.text({
       message: "Chars to keep per tool_result",
@@ -185,9 +191,31 @@ async function pickMode(): Promise<TrimOptions | null> {
       },
     });
     if (p.isCancel(raw)) return null;
-    return { mode: "truncate" as TrimMode, keepChars: Number(raw) };
+    baseOpts = { mode: "truncate", keepChars: Number(raw) };
+  } else if (mode === "recency") {
+    const raw = await p.text({
+      message: "How many recent turns to keep verbatim?",
+      placeholder: "15",
+      initialValue: "15",
+      validate: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return "Enter a positive number";
+      },
+    });
+    if (p.isCancel(raw)) return null;
+    baseOpts = { mode: "recency", keepLastN: Number(raw) };
   }
-  return { mode: mode as TrimMode };
+
+  if (mode !== "ultra") {
+    const drop = await p.confirm({
+      message: "Also drop thinking blocks? (extra savings, safe on resume)",
+      initialValue: true,
+    });
+    if (p.isCancel(drop)) return null;
+    baseOpts.dropThinking = drop;
+  }
+
+  return baseOpts;
 }
 
 function printHistorySummary(): void {
