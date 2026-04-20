@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { existsSync } from "node:fs";
@@ -163,6 +163,10 @@ async function pickMode(): Promise<TrimOptions | null> {
         label: `${pc.blue("Recency")}  ${pc.dim("keep last N turns verbatim, redact older")}`,
       },
       {
+        value: "focus",
+        label: `${pc.cyan("Focus")}    ${pc.dim("dialog trail + last N turns verbatim — between Ultra & Recency")}`,
+      },
+      {
         value: "smart",
         label: `${pc.magenta("Smart")}    ${pc.dim("light — per-tool rules, preserves Read heads, Bash errors, TodoWrite")}`,
       },
@@ -192,7 +196,7 @@ async function pickMode(): Promise<TrimOptions | null> {
     });
     if (p.isCancel(raw)) return null;
     baseOpts = { mode: "truncate", keepChars: Number(raw) };
-  } else if (mode === "recency") {
+  } else if (mode === "recency" || mode === "focus") {
     const raw = await p.text({
       message: "How many recent turns to keep verbatim?",
       placeholder: "15",
@@ -203,7 +207,7 @@ async function pickMode(): Promise<TrimOptions | null> {
       },
     });
     if (p.isCancel(raw)) return null;
-    baseOpts = { mode: "recency", keepLastN: Number(raw) };
+    baseOpts = { mode: mode as TrimMode, keepLastN: Number(raw) };
   }
 
   if (mode !== "ultra") {

@@ -3,7 +3,15 @@
 **Shrink Claude Code sessions so cold `/resume` costs less.**
 
 ```bash
-bunx claudecompress
+bunx claudecompress           # bun
+npx claudecompress            # npm
+```
+
+No install required — `bunx`/`npx` fetches the latest release from npm on demand. To keep it around:
+
+```bash
+bun add -g claudecompress     # or: npm i -g claudecompress
+claudecompress
 ```
 
 Interactive CLI: picks a project, shows each session's size + cache staleness + estimated cold-resume cost in USD, lets you trim it. Your source `.jsonl` is never modified — a new session file is written alongside it with a fresh UUID.
@@ -21,24 +29,32 @@ The CLI flags cache state per-session (`warm`, `cold`, `very-cold`) from JSONL m
 
 ## What it does
 
-Five modes, pick at runtime:
+Six modes, pick at runtime:
 
 | Mode | Weight | Behavior |
 |---|---|---|
 | **Redact** (default) | medium | drop all tool_result bodies, keep full structure |
-| **Recency N** | medium | keep the last N turns verbatim (tool_results and all), redact older turns |
+| **Recency N** | medium | keep last N turns verbatim (tool_results and all), redact older |
+| **Focus N** | medium–heavy | keep last N turns verbatim + dialog-only trail for everything before |
 | **Smart** | light | per-tool rules — head/tail for `Read`/`Bash`, keep `Edit`/`TodoWrite`, redact `WebFetch` / MCP Playwright |
 | **Ultra** | heavy | user + assistant text turns only; tool calls, results, thinking all dropped |
 | **Truncate N** | manual | keep first N chars of every tool_result |
 
-**Recency** is the pragmatic default for "I want to continue working" — old context gets dropped but your last ~15 turns stay intact with their full tool output, so you can pick right back up.
+**Redact** is the safe default — keeps structure and tool names intact, only drops bulky result bodies.
+**Recency** is best for "I want to continue working" — full continuation state for the last N turns.
+**Focus** is the sweet spot between Ultra and Recency — you keep a dialog-only trail of the whole conversation *plus* the last N turns fully intact. Great when Recency is still too heavy and Ultra loses too much.
 
-**Drop-thinking toggle:** any non-Ultra mode can additionally drop `thinking` blocks. Often ~250k tokens saved on a long session with extended thinking, and thinking is never replayed meaningfully on resume.
+**Drop-thinking toggle:** any non-Ultra mode can additionally drop `thinking` blocks. Often 200k+ tokens saved on a long session and thinking is never replayed meaningfully on resume.
 
 Real example on a 35 MB / 760k-token Opus session ($11.41 cold):
-- **Redact**: 23 MB / 504k tokens — $7.56 (saved $3.85)
-- **Recency 15**: 23 MB / 501k tokens — $7.52 (saved $3.89, last 15 turns kept in full)
-- **Ultra**: 1.2 MB / 115k tokens — $1.73 (saved $9.68, dialog only)
+
+| Mode | Size | Tokens | Cost | Saved |
+|---|---|---|---|---|
+| Redact | 23 MB | 504k | $7.56 | $3.85 |
+| Recency 15 | 23 MB | 501k | $7.52 | $3.89 |
+| Focus 500 | 2.8 MB | 217k | $3.25 | $8.16 |
+| Focus 100 | 1.5 MB | 136k | $2.04 | $9.37 |
+| Ultra | 1.2 MB | 125k | $1.88 | $9.53 |
 
 ## Stack fit
 

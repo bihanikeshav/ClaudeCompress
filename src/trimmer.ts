@@ -239,11 +239,11 @@ export async function trimSession(
   let lastKeptUuid: string | null = null;
   const toolUseNames = new Map<string, string>();
 
-  const totalTurns = opts.mode === "recency" ? countConversationTurns(inputPath) : 0;
-  const recencyCutoff =
-    opts.mode === "recency"
-      ? Math.max(0, totalTurns - (opts.keepLastN ?? 15))
-      : 0;
+  const needsTurnCount = opts.mode === "recency" || opts.mode === "focus";
+  const totalTurns = needsTurnCount ? countConversationTurns(inputPath) : 0;
+  const recencyCutoff = needsTurnCount
+    ? Math.max(0, totalTurns - (opts.keepLastN ?? 15))
+    : 0;
   let turnIndex = 0;
 
   for await (const line of rl) {
@@ -272,6 +272,28 @@ export async function trimSession(
         ? { ...rec, ...(rec.sessionId ? { sessionId: newSid } : {}) }
         : trimRecordRedact(rec, newSid);
       if (!newRec) continue;
+    } else if (opts.mode === "focus") {
+      const isTurn = rec.type === "user" || rec.type === "assistant";
+      const currentIdx = isTurn ? turnIndex : -1;
+      if (isTurn) turnIndex += 1;
+      const inRecent = currentIdx >= recencyCutoff;
+
+      if (!isTurn) {
+        // Drop all non-message records in the old phase (attachments, snapshots,
+        // queue ops); keep them verbatim once we're past the cutoff.
+        if (turnIndex < recencyCutoff) continue;
+        newRec = { ...rec };
+        if ("sessionId" in newRec) newRec.sessionId = newSid;
+      } else if (!inRecent) {
+        newRec = ultraTrimRecord(rec, newSid);
+        if (!newRec) continue;
+        newRec.parentUuid = lastKeptUuid;
+        lastKeptUuid = newRec.uuid ?? lastKeptUuid;
+      } else {
+        newRec = { ...rec, sessionId: newSid };
+        newRec.parentUuid = lastKeptUuid ?? newRec.parentUuid ?? null;
+        lastKeptUuid = newRec.uuid ?? lastKeptUuid;
+      }
     } else {
       newRec = trimRecordRedact(
         rec,
