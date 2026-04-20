@@ -9,10 +9,18 @@ import {
   listSessions,
   projectDirForCwd,
   humanBytes,
+  staleness,
+  type CacheState,
 } from "./paths.ts";
 import { analyze, summarizeSession } from "./analyzer.ts";
 import { trimSession } from "./trimmer.ts";
 import type { TrimMode, TrimOptions } from "./types.ts";
+
+function cacheTag(state: CacheState, label: string): string {
+  if (state === "warm") return pc.red(`warm · ${label}`);
+  if (state === "cold") return pc.yellow(`cold · ${label}`);
+  return pc.green(`cold · ${label}`);
+}
 
 function preview(s: string, max = 70): string {
   const oneline = s.replace(/\s+/g, " ").trim();
@@ -84,13 +92,15 @@ async function pickSession(projectDir: string): Promise<string | null> {
   }
 
   const sessionInfos = sessions.slice(0, 25).map((path) => summarizeSession(path));
+  const latest = sessionInfos[0]!;
+  const latestStale = staleness(latest.mtime);
 
   const choice = await p.select({
     message: "Which session?",
     options: [
       {
-        value: sessionInfos[0]!.path,
-        label: `${pc.green("Latest")}  ${pc.dim(humanBytes(sessionInfos[0]!.bytes))}  ${pc.dim(preview(sessionInfos[0]!.firstUserMessage, 50))}`,
+        value: latest.path,
+        label: `${pc.green("Latest")}  ${pc.dim(humanBytes(latest.bytes))}  ${cacheTag(latestStale.state, latestStale.label)}  ${pc.dim(preview(latest.firstUserMessage, 45))}`,
       },
       { value: "__browse__", label: "Browse all sessions" },
     ],
@@ -100,10 +110,13 @@ async function pickSession(projectDir: string): Promise<string | null> {
 
   const picked = await p.select({
     message: "Pick a session",
-    options: sessionInfos.map((s) => ({
-      value: s.path,
-      label: `${humanBytes(s.bytes).padStart(9)}  ${pc.dim(s.sessionId.slice(0, 8))}  ${preview(s.firstUserMessage, 55)}`,
-    })),
+    options: sessionInfos.map((s) => {
+      const st = staleness(s.mtime);
+      return {
+        value: s.path,
+        label: `${humanBytes(s.bytes).padStart(9)}  ${cacheTag(st.state, st.label).padEnd(22)}  ${pc.dim(preview(s.firstUserMessage, 50))}`,
+      };
+    }),
   });
   if (p.isCancel(picked)) return null;
   return picked as string;
@@ -155,6 +168,22 @@ async function main() {
   const session = await pickSession(project);
   if (!session) return p.cancel("Aborted.");
 
+  const sessionInfo = summarizeSession(session);
+  const stale = staleness(sessionInfo.mtime);
+  console.log();
+  console.log(
+    `${pc.dim("Last activity:")} ${stale.label}  ${pc.dim("·")}  ${cacheTag(stale.state, stale.state === "warm" ? "cache likely warm" : "cache expired")}`,
+  );
+  if (stale.state === "warm") {
+    console.log(
+      pc.yellow(
+        "  ⚠  Prompt cache is probably still live. Compressing now would invalidate it\n" +
+          "     and cost more than you save. Only proceed if you know you're done with this\n" +
+          "     session and want to resume cold later.",
+      ),
+    );
+  }
+
   const before = analyze(session);
   printReport("Before", before);
 
@@ -162,8 +191,11 @@ async function main() {
   if (!opts) return p.cancel("Aborted.");
 
   const confirm = await p.confirm({
-    message: `Write a stripped copy alongside ${basename(session)}?`,
-    initialValue: true,
+    message:
+      stale.state === "warm"
+        ? `Cache is warm. Trim anyway?`
+        : `Write a stripped copy alongside ${basename(session)}?`,
+    initialValue: stale.state !== "warm",
   });
   if (p.isCancel(confirm) || !confirm) return p.cancel("Aborted.");
 
