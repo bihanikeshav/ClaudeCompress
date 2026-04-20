@@ -1,0 +1,44 @@
+{
+  "name": "claudecompress",
+  "version": "0.1.0",
+  "description": "Analyze and shrink Claude Code session transcripts so /resume loads faster and cheaper.",
+  "type": "module",
+  "bin": {
+    "claudecompress": "./src/index.ts"
+  },
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "build": "bun build src/index.ts --target=node --outdir=dist"
+  },
+  "keywords": [
+    "claude-code",
+    "claude",
+    "anthropic",
+    "context",
+    "compress",
+    "transcript",
+    "cli"
+  ],
+  "author": "bihanikeshav",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bihanikeshav/ClaudeCompress.git"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0",
+    "picocolors": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ]
+}
