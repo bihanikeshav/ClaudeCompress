@@ -21,15 +21,18 @@ The CLI flags cache state per-session (`warm`, `cold`, `very-cold`) from JSONL m
 
 ## What it does
 
-Three modes, pick at runtime:
+Four modes, pick at runtime:
 
 | Mode | Keeps | Drops | Size ratio |
 |---|---|---|---|
+| **Smart** (default) | per-tool rules — head/tail for `Read`/`Bash`, full for `Edit`/`TodoWrite`, redact for `WebFetch` / MCP Playwright | everything else blanket-redacted | ~60–70% |
 | **Ultra** | user + assistant text turns | tool calls, results, thinking, attachments | 3–10% |
-| **Redact** | full structure, tool names + inputs | tool-result bodies | 60–70% |
+| **Redact** | full structure, tool names + inputs | tool-result bodies (blanket) | 60–70% |
 | **Truncate N** | structure + first N chars of each tool_result | the rest | tunable |
 
-Real example on a 35 MB / 777k-token Opus session → **Ultra: 1.2 MB / 115k tokens** (~$9.93 saved on cold resume).
+Smart preserves *signal* (you still see the file you read, errors at the end of a Bash run, what's in your TodoWrite) while cutting bulk. Ultra and Redact are more aggressive; Truncate is the manual knob.
+
+Real example on a 35 MB / 777k-token Opus session → **Ultra: 1.2 MB / 115k tokens** (~$9.93 saved), **Smart: 23 MB / 628k tokens** (~$2.00 saved, full tool-trail context preserved).
 
 ## Stack fit
 
@@ -55,6 +58,16 @@ cd ClaudeCompress && bun install && bun run src/index.ts
 ```
 
 After trimming, `/resume` in Claude Code and pick the `[TRIMMED by claudecompress] …` entry. Send any message (e.g. `hi`) — `/context` recomputes and you'll see the drop (typically 50–80%).
+
+## History
+
+Every trim is logged to `~/.claude/claudecompress/history.jsonl`. See cumulative savings:
+
+```bash
+bunx claudecompress history
+```
+
+Shows recent trims, per-trim savings, and a lifetime total. The intro of the interactive flow also surfaces a one-liner like `Lifetime: 7 trims · saved ≈ $42.18`.
 
 ## Pricing per model
 

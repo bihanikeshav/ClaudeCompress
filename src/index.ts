@@ -22,6 +22,7 @@ import {
   formatUSD,
   type ModelInfo,
 } from "./pricing.ts";
+import { recordTrim, summarizeHistory, readHistory } from "./history.ts";
 
 function cacheTag(state: CacheState, label: string): string {
   if (state === "warm") return pc.red(`warm · ${label}`);
@@ -153,16 +154,20 @@ async function pickMode(): Promise<TrimOptions | null> {
     message: "How aggressive?",
     options: [
       {
+        value: "smart",
+        label: `${pc.magenta("Smart")}    ${pc.dim("per-tool rules — head/tail Read/Bash, keep small state, redact fetches")}`,
+      },
+      {
         value: "ultra",
-        label: `${pc.green("Ultra")}   ${pc.dim("dialog only — smallest, breaks tool replay")}`,
+        label: `${pc.green("Ultra")}    ${pc.dim("dialog only — smallest, breaks tool replay")}`,
       },
       {
         value: "redact",
-        label: `${pc.yellow("Redact")}  ${pc.dim("drop tool_result bodies, keep structure")}`,
+        label: `${pc.yellow("Redact")}   ${pc.dim("drop all tool_result bodies, keep structure")}`,
       },
       {
         value: "truncate",
-        label: `${pc.cyan("Truncate")} ${pc.dim("keep first N chars of each tool_result")}`,
+        label: `${pc.cyan("Truncate")} ${pc.dim("keep first N chars of every tool_result")}`,
       },
     ],
   });
@@ -184,9 +189,57 @@ async function pickMode(): Promise<TrimOptions | null> {
   return { mode: mode as TrimMode };
 }
 
+function printHistorySummary(): void {
+  const summary = summarizeHistory();
+  if (summary.count === 0) return;
+  console.log(
+    pc.dim(
+      `Lifetime: ${summary.count} trim${summary.count === 1 ? "" : "s"} · saved ≈ ${formatUSD(summary.costSaved)} (${formatTokens(summary.tokensSaved)} tokens)`,
+    ),
+  );
+  console.log();
+}
+
+async function runHistory(): Promise<void> {
+  const events = readHistory();
+  if (events.length === 0) {
+    console.log(pc.dim("No trim history yet. Run claudecompress first."));
+    return;
+  }
+  console.log(pc.bold(`claudecompress history · ${events.length} event${events.length === 1 ? "" : "s"}`));
+  console.log();
+  console.log(
+    `${"when".padEnd(20)}${"mode".padEnd(10)}${"model".padEnd(12)}${"saved".padStart(9)}${"tokens".padStart(12)}`,
+  );
+  console.log("-".repeat(63));
+  const recent = events.slice(-20).reverse();
+  for (const e of recent) {
+    const when = new Date(e.timestamp).toISOString().slice(0, 16).replace("T", " ");
+    const saved = formatUSD(Math.max(0, e.costBefore - e.costAfter));
+    const tks = formatTokens(Math.max(0, e.tokensBefore - e.tokensAfter));
+    console.log(
+      `${when.padEnd(20)}${e.mode.padEnd(10)}${(e.model.replace("claude-", "")).padEnd(12)}${saved.padStart(9)}${tks.padStart(12)}`,
+    );
+  }
+  const summary = summarizeHistory(events);
+  console.log();
+  console.log(
+    pc.bold("total saved ≈ ") +
+      pc.green(formatUSD(summary.costSaved)) +
+      pc.dim(`  (${formatTokens(summary.tokensSaved)} tokens across ${summary.count} trims)`),
+  );
+}
+
 async function main() {
+  const [, , sub] = process.argv;
+  if (sub === "history") {
+    await runHistory();
+    return;
+  }
+
   console.clear();
   p.intro(pc.bgCyan(pc.black(" claudecompress ")));
+  printHistorySummary();
 
   const model = await pickModel();
   if (!model) return p.cancel("Aborted.");
@@ -246,6 +299,20 @@ async function main() {
   const afterCost = estimateColdResumeCost(afterTokens, model);
   const savedTokens = Math.max(0, beforeTokens - afterTokens);
   const savedCost = Math.max(0, beforeCost - afterCost);
+
+  recordTrim({
+    timestamp: new Date().toISOString(),
+    mode: opts.mode,
+    model: model.id,
+    sourcePath: session,
+    outputPath: outPath,
+    bytesBefore: before.bytes,
+    bytesAfter: after.bytes,
+    tokensBefore: beforeTokens,
+    tokensAfter: afterTokens,
+    costBefore: beforeCost,
+    costAfter: afterCost,
+  });
 
   const ratio = ((100 * after.bytes) / (before.bytes || 1)).toFixed(1);
   console.log();

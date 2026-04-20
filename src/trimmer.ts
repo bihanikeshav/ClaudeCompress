@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TrimOptions } from "./types.ts";
+import { applyRuleToText, matchRule } from "./rules.ts";
 
 const TRIM_MARKER = "[TRIMMED by claudecompress] ";
 const IMAGE_PLACEHOLDER = "[image stripped by claudecompress]";
@@ -73,6 +74,62 @@ function trimRecordRedact(rec: any, newSid: string, keepChars?: number): any | n
     });
     out.message = { ...msg, content: newContent };
   }
+  return out;
+}
+
+function smartTrimResult(blk: any, toolName: string | undefined): any {
+  const rule = matchRule(toolName ?? "*");
+  if (rule.action.kind === "keep") return blk;
+  if (rule.action.kind === "redact") return redactToolResult(blk);
+
+  const content = blk.content;
+  if (typeof content === "string") {
+    const trimmed = applyRuleToText(content, rule.action);
+    if (trimmed === content) return blk;
+    return { ...blk, content: trimmed };
+  }
+  if (Array.isArray(content)) {
+    const newList = content.map((b: any) => {
+      if (!b || typeof b !== "object") return b;
+      if (b.type === "text" && typeof b.text === "string") {
+        const nt = applyRuleToText(b.text, rule.action);
+        return nt === b.text ? b : { ...b, text: nt };
+      }
+      if (b.type === "image") return { type: "text", text: IMAGE_PLACEHOLDER };
+      return b;
+    });
+    return { ...blk, content: newList };
+  }
+  return blk;
+}
+
+function trimRecordSmart(
+  rec: any,
+  newSid: string,
+  toolUseNames: Map<string, string>,
+): any | null {
+  const out = { ...rec };
+  if ("sessionId" in out) out.sessionId = newSid;
+  const msg = out.message;
+  if (!msg || typeof msg !== "object" || !Array.isArray(msg.content)) return out;
+
+  // First pass on this record: capture any tool_use names it introduces.
+  for (const blk of msg.content) {
+    if (blk?.type === "tool_use" && blk.id && blk.name) {
+      toolUseNames.set(blk.id, blk.name);
+    }
+  }
+
+  const newContent = msg.content.map((blk: any) => {
+    if (!blk || typeof blk !== "object") return blk;
+    if (blk.type === "tool_result") {
+      const name = toolUseNames.get(blk.tool_use_id);
+      return smartTrimResult(blk, name);
+    }
+    if (blk.type === "image") return stripImage();
+    return blk;
+  });
+  out.message = { ...msg, content: newContent };
   return out;
 }
 
@@ -147,6 +204,7 @@ export async function trimSession(
 
   let marked = false;
   let lastKeptUuid: string | null = null;
+  const toolUseNames = new Map<string, string>();
 
   for await (const line of rl) {
     if (!line) continue;
@@ -163,6 +221,9 @@ export async function trimSession(
       if (!newRec) continue;
       newRec.parentUuid = lastKeptUuid;
       lastKeptUuid = newRec.uuid ?? lastKeptUuid;
+    } else if (opts.mode === "smart") {
+      newRec = trimRecordSmart(rec, newSid, toolUseNames);
+      if (!newRec) continue;
     } else {
       newRec = trimRecordRedact(
         rec,
