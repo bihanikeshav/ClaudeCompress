@@ -92,16 +92,41 @@ bunx claudecompress history
 
 Shows recent trims, per-trim savings, and a lifetime total. The intro of the interactive flow also surfaces a one-liner like `Lifetime: 7 trims · saved ≈ $42.18`.
 
-## `/compress` slash command (v0.3+)
+## `/compress` slash command + live cache timer (v0.3+)
 
-Install a Claude Code hook so you can run `/compress` from inside any session — no leaving the CLI to trim:
+Install once and get both the `/compress` slash command **and** a live cache-TTL countdown rendered in Claude Code's own UI:
 
 ```bash
-bun add -g claudecompress   # recommended, fast hook startup
+bun add -g claudecompress     # global install recommended
 claudecompress install
 ```
 
-This edits `~/.claude/settings.json` to add a `UserPromptSubmit` hook matched on `^/compress`, and writes `~/.claude/commands/compress.md`. Restart Claude Code once.
+This edits `~/.claude/settings.json` to:
+1. Add a `UserPromptSubmit` hook matched on `^/compress` → runs `claudecompress hook`
+2. Set a `statusLine` → runs `claudecompress statusline`, shown in-pane by Claude Code
+
+Also writes `~/.claude/commands/compress.md`. Restart Claude Code once.
+
+**Cache timer** appears inside Claude Code's status line (cross-OS, no terminal hacking — Claude Code renders it natively):
+```
+◉ agent working · cache refreshing · Opus 4.7
+◉ cache warm · 5m · 2:47 left · Opus 4.7
+◉ cache warm · 1h · 47:21 left · Opus 4.7
+○ cache cold · 12m past · /compress recommended
+```
+
+It reads the current session's JSONL tail, finds the most recent `message.usage`, detects whether you're using 5-minute or 1-hour cache (from `ephemeral_1h_input_tokens`), compares latest user vs latest assistant timestamps to decide "working" vs "idle", and counts down from the last assistant turn.
+
+**Install is per-component** — the installer asks before adding the hook and before adding the statusLine. Skip either at install time and add it later:
+
+```bash
+claudecompress install              # interactive, asks about each piece
+claudecompress install-statusline   # just the cache timer
+claudecompress install-hook         # just the /compress slash command
+claudecompress uninstall            # remove everything claudecompress added
+```
+
+Existing custom `statusLine` entries are never overwritten without explicit confirmation.
 
 Then inside any session:
 
