@@ -17,17 +17,30 @@ const COMMAND_PATH = join(CLAUDE_HOME, "commands", "compress.md");
 
 const HOOK_MATCHER = "^/compress";
 const HOOK_TAG = "claudecompress hook";
+const STATUSLINE_TAG = "claudecompress statusline";
 
-function detectHookCommand(): string {
-  // Prefer an on-PATH binary (global install) for fast startup.
+function hasGlobalBinary(): boolean {
   try {
     const which = process.platform === "win32" ? "where" : "which";
     execSync(`${which} claudecompress`, { stdio: "ignore" });
-    return "claudecompress hook";
+    return true;
   } catch {
-    // Fall back to npx, slower cold-start but works without global install.
-    return "npx -y claudecompress hook";
+    return false;
   }
+}
+
+function detectHookCommand(): string {
+  // Hook fires only on /compress prompts — npx cold-start is tolerable,
+  // but we still prefer a global binary for speed.
+  return hasGlobalBinary()
+    ? "claudecompress hook"
+    : "npx -y claudecompress hook";
+}
+
+function detectStatuslineCommand(): string | null {
+  // Statusline is invoked frequently; npx cold-start (~500ms+) is unacceptable
+  // here. Only wire it up if a global binary exists.
+  return hasGlobalBinary() ? "claudecompress statusline" : null;
 }
 
 function readSettings(): any {
@@ -130,6 +143,41 @@ export async function install(): Promise<void> {
 
   const b = backup(SETTINGS_PATH);
   addHook(settings, hookCommand);
+
+  // Statusline (cache timer) — default on
+  const statuslineCmd = detectStatuslineCommand();
+  let statuslineInstalled = false;
+  let statuslineSkippedReason: string | null = null;
+
+  if (!statuslineCmd) {
+    statuslineSkippedReason =
+      "claudecompress is not on PATH — install globally to enable the cache timer:  bun add -g claudecompress";
+  } else {
+    const existing = settings.statusLine;
+    const existingIsOurs =
+      existing?.command?.includes(STATUSLINE_TAG) ?? false;
+
+    if (!existing) {
+      settings.statusLine = { type: "command", command: statuslineCmd };
+      statuslineInstalled = true;
+    } else if (existingIsOurs) {
+      settings.statusLine.command = statuslineCmd; // refresh to latest form
+      statuslineInstalled = true;
+    } else {
+      const overwrite = await p.confirm({
+        message: `A custom statusLine is already set (${pc.dim(existing.command ?? JSON.stringify(existing))}). Replace with claudecompress cache timer?`,
+        initialValue: false,
+      });
+      if (p.isCancel(overwrite)) return p.cancel("Aborted.");
+      if (overwrite) {
+        settings.statusLine = { type: "command", command: statuslineCmd };
+        statuslineInstalled = true;
+      } else {
+        statuslineSkippedReason = "kept your existing statusLine";
+      }
+    }
+  }
+
   mkdirSync(CLAUDE_HOME, { recursive: true });
   writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
 
@@ -137,6 +185,13 @@ export async function install(): Promise<void> {
 
   if (b) p.log.info(`Backed up previous settings to ${b}`);
   p.log.success(`Installed /compress hook and ${COMMAND_PATH}.`);
+  if (statuslineInstalled) {
+    p.log.success(
+      "Installed cache timer statusLine (shows ttl remaining inside claude's UI).",
+    );
+  } else if (statuslineSkippedReason) {
+    p.log.warn(`Skipped cache timer statusLine — ${statuslineSkippedReason}`);
+  }
   p.log.info(
     "Restart Claude Code, then type /compress inside any session to trim it.",
   );
@@ -162,13 +217,20 @@ export async function uninstall(): Promise<void> {
     return;
   }
   const removed = removeHook(settings);
-  if (removed === 0) {
-    p.log.info("No claudecompress hook found.");
+  let removedStatusline = false;
+  if (settings.statusLine?.command?.includes(STATUSLINE_TAG)) {
+    delete settings.statusLine;
+    removedStatusline = true;
+  }
+  if (removed === 0 && !removedStatusline) {
+    p.log.info("No claudecompress hook or statusLine found.");
     return;
   }
   const b = backup(SETTINGS_PATH);
   writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
   if (b) p.log.info(`Backed up previous settings to ${b}`);
-  p.log.success(`Removed ${removed} claudecompress hook entr${removed === 1 ? "y" : "ies"}.`);
+  if (removed > 0)
+    p.log.success(`Removed ${removed} claudecompress hook entr${removed === 1 ? "y" : "ies"}.`);
+  if (removedStatusline) p.log.success("Removed claudecompress statusLine.");
   p.outro(pc.green("Done."));
 }

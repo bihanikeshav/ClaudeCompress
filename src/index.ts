@@ -274,6 +274,11 @@ async function main() {
     await runHook();
     return;
   }
+  if (sub === "statusline") {
+    const { runStatusline } = await import("./statusline.ts");
+    await runStatusline();
+    return;
+  }
   if (sub === "install") {
     const { install } = await import("./install.ts");
     await install();
