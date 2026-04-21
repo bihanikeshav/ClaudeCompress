@@ -284,6 +284,16 @@ async function main() {
     await install();
     return;
   }
+  if (sub === "install-statusline") {
+    const { installStatusline } = await import("./install.ts");
+    await installStatusline();
+    return;
+  }
+  if (sub === "install-hook") {
+    const { installHook } = await import("./install.ts");
+    await installHook();
+    return;
+  }
   if (sub === "uninstall") {
     const { uninstall } = await import("./install.ts");
     await uninstall();

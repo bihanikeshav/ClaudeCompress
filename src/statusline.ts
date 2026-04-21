@@ -27,6 +27,7 @@ interface Usage {
 interface LatestInfo {
   timestamp: Date | null;
   usage: Usage | null;
+  lastUserTs: Date | null;
 }
 
 function readStdin(): Promise<string> {
@@ -74,9 +75,14 @@ function findLatestUsage(path: string): LatestInfo {
   try {
     data = readTail(path);
   } catch {
-    return { timestamp: null, usage: null };
+    return { timestamp: null, usage: null, lastUserTs: null };
   }
   const lines = data.split("\n");
+  let assistant: { ts: Date | null; usage: Usage } | null = null;
+  let lastUserTs: Date | null = null;
+
+  // Walk back-to-front; bail as soon as we have both the last user turn and
+  // the most recent assistant turn carrying cache usage.
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i];
     if (!line) continue;
@@ -86,18 +92,26 @@ function findLatestUsage(path: string): LatestInfo {
     } catch {
       continue;
     }
-    const usage: Usage | undefined = rec?.message?.usage;
-    if (!usage) continue;
-    const hasCache =
-      (usage.cache_creation_input_tokens ?? 0) > 0 ||
-      (usage.cache_read_input_tokens ?? 0) > 0 ||
-      (usage.cache_creation?.ephemeral_5m_input_tokens ?? 0) > 0 ||
-      (usage.cache_creation?.ephemeral_1h_input_tokens ?? 0) > 0;
-    if (!hasCache) continue;
     const ts = rec?.timestamp ? new Date(rec.timestamp) : null;
-    return { timestamp: ts, usage };
+    if (!lastUserTs && rec?.type === "user") lastUserTs = ts;
+    if (!assistant && rec?.type === "assistant") {
+      const usage: Usage | undefined = rec?.message?.usage;
+      if (usage) {
+        const hasCache =
+          (usage.cache_creation_input_tokens ?? 0) > 0 ||
+          (usage.cache_read_input_tokens ?? 0) > 0 ||
+          (usage.cache_creation?.ephemeral_5m_input_tokens ?? 0) > 0 ||
+          (usage.cache_creation?.ephemeral_1h_input_tokens ?? 0) > 0;
+        if (hasCache) assistant = { ts, usage };
+      }
+    }
+    if (assistant && lastUserTs) break;
   }
-  return { timestamp: null, usage: null };
+  return {
+    timestamp: assistant?.ts ?? null,
+    usage: assistant?.usage ?? null,
+    lastUserTs,
+  };
 }
 
 function fmtRemaining(seconds: number): string {
@@ -129,9 +143,24 @@ export async function runStatusline(): Promise<void> {
     process.stdout.write("");
     return;
   }
-  const { timestamp, usage } = findLatestUsage(path);
+  const { timestamp, usage, lastUserTs } = findLatestUsage(path);
+  const modelLabel = input.model?.display_name ?? input.model?.id ?? "";
+  const modelTag = modelLabel ? ` · ${modelLabel}` : "";
+
+  // "Working" detection: the latest user message is newer than the latest
+  // assistant turn, meaning Claude hasn't written a completion yet. During
+  // this window the cache is actively being used/refreshed.
+  const isWorking =
+    lastUserTs !== null &&
+    (timestamp === null || lastUserTs.getTime() > timestamp.getTime());
+
+  if (isWorking) {
+    process.stdout.write(`◉ agent working · cache refreshing${modelTag}`);
+    return;
+  }
+
   if (!timestamp || !usage) {
-    process.stdout.write("◉ new session · cache not yet seeded");
+    process.stdout.write(`◉ new session · cache not yet seeded${modelTag}`);
     return;
   }
   const is1h =
@@ -140,8 +169,6 @@ export async function runStatusline(): Promise<void> {
   const ageSec = (Date.now() - timestamp.getTime()) / 1000;
   const remainingSec = ttlSec - ageSec;
   const mode = is1h ? "1h" : "5m";
-  const modelLabel = input.model?.display_name ?? input.model?.id ?? "";
-  const modelTag = modelLabel ? ` · ${modelLabel}` : "";
 
   if (remainingSec > 0) {
     process.stdout.write(

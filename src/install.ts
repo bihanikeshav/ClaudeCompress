@@ -30,20 +30,14 @@ function hasGlobalBinary(): boolean {
 }
 
 function detectHookCommand(): string {
-  // Hook fires only on /compress prompts — npx cold-start is tolerable,
-  // but we still prefer a global binary for speed.
   return hasGlobalBinary()
     ? "claudecompress hook"
     : "npx -y claudecompress hook";
 }
 
 function detectStatuslineCommand(): { cmd: string; viaNpx: boolean } {
-  // Claude Code invokes the statusline on its own cadence (event-driven after
-  // turns/refreshes, not sub-second polling), and the output is computed from
-  // a timestamp in the JSONL — so we don't poll internally either. That means
-  // npx cold-start only costs one delay per Claude Code refresh, which is
-  // tolerable. Still prefer a global binary when available.
-  if (hasGlobalBinary()) return { cmd: "claudecompress statusline", viaNpx: false };
+  if (hasGlobalBinary())
+    return { cmd: "claudecompress statusline", viaNpx: false };
   return { cmd: "npx -y claudecompress statusline", viaNpx: true };
 }
 
@@ -63,6 +57,13 @@ function backup(path: string): string | null {
   const backupPath = `${path}.claudecompress.bak`;
   copyFileSync(path, backupPath);
   return backupPath;
+}
+
+function writeSettings(settings: any): string | null {
+  const b = backup(SETTINGS_PATH);
+  mkdirSync(CLAUDE_HOME, { recursive: true });
+  writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
+  return b;
 }
 
 function hasExistingHook(settings: any): boolean {
@@ -111,6 +112,80 @@ message it means the hook did not run — see https://github.com/bihanikeshav/Cl
   writeFileSync(COMMAND_PATH, body);
 }
 
+// Plan step-by-step: decide what the hook change would be without writing yet,
+// so the outer flow can show a clear confirm and skip-both cleanly.
+type HookDecision =
+  | { kind: "install"; command: string; viaNpx: boolean }
+  | { kind: "reinstall"; command: string; viaNpx: boolean }
+  | { kind: "skip"; reason: string };
+
+async function planHook(settings: any): Promise<HookDecision | null> {
+  const command = detectHookCommand();
+  const viaNpx = command.startsWith("npx");
+  if (hasExistingHook(settings)) {
+    const reinstall = await p.confirm({
+      message:
+        "A /compress hook is already installed. Reinstall with updated command?",
+      initialValue: false,
+    });
+    if (p.isCancel(reinstall)) return null;
+    return reinstall
+      ? { kind: "reinstall", command, viaNpx }
+      : { kind: "skip", reason: "kept existing /compress hook" };
+  }
+  const go = await p.confirm({
+    message: `Install the /compress slash command hook?  ${pc.dim(`(${command})`)}`,
+    initialValue: true,
+  });
+  if (p.isCancel(go)) return null;
+  return go
+    ? { kind: "install", command, viaNpx }
+    : { kind: "skip", reason: "skipped /compress hook (run `claudecompress install-hook` to add later)" };
+}
+
+type StatusDecision =
+  | { kind: "install"; command: string; viaNpx: boolean }
+  | { kind: "skip"; reason: string };
+
+async function planStatusline(settings: any): Promise<StatusDecision | null> {
+  const { cmd: command, viaNpx } = detectStatuslineCommand();
+  const existing = settings.statusLine;
+  const existingIsOurs =
+    typeof existing?.command === "string" &&
+    existing.command.includes(STATUSLINE_TAG);
+
+  if (existingIsOurs) {
+    const refresh = await p.confirm({
+      message: "claudecompress statusLine is already installed. Refresh command?",
+      initialValue: false,
+    });
+    if (p.isCancel(refresh)) return null;
+    return refresh
+      ? { kind: "install", command, viaNpx }
+      : { kind: "skip", reason: "kept existing claudecompress statusLine" };
+  }
+
+  if (existing) {
+    const overwrite = await p.confirm({
+      message: `A custom statusLine is set (${pc.dim(existing.command ?? JSON.stringify(existing))}). Replace with claudecompress cache timer?`,
+      initialValue: false,
+    });
+    if (p.isCancel(overwrite)) return null;
+    return overwrite
+      ? { kind: "install", command, viaNpx }
+      : { kind: "skip", reason: "kept your existing statusLine" };
+  }
+
+  const go = await p.confirm({
+    message: `Install the cache-timer statusLine?  ${pc.dim(`(${command})`)}`,
+    initialValue: true,
+  });
+  if (p.isCancel(go)) return null;
+  return go
+    ? { kind: "install", command, viaNpx }
+    : { kind: "skip", reason: "skipped cache timer (run `claudecompress install-statusline` to add later)" };
+}
+
 export async function install(): Promise<void> {
   console.clear();
   p.intro(pc.bgCyan(pc.black(" claudecompress install ")));
@@ -123,88 +198,132 @@ export async function install(): Promise<void> {
     return;
   }
 
-  if (hasExistingHook(settings)) {
-    p.log.info("A /compress hook is already installed.");
-    const reinstall = await p.confirm({
-      message: "Reinstall with updated command?",
-      initialValue: false,
-    });
-    if (p.isCancel(reinstall) || !reinstall) return p.cancel("Aborted.");
-    removeHook(settings);
+  const hookDecision = await planHook(settings);
+  if (!hookDecision) return p.cancel("Aborted.");
+
+  const statusDecision = await planStatusline(settings);
+  if (!statusDecision) return p.cancel("Aborted.");
+
+  if (
+    hookDecision.kind === "skip" &&
+    statusDecision.kind === "skip"
+  ) {
+    p.log.info("Nothing to do.");
+    p.outro("Done.");
+    return;
   }
 
-  const hookCommand = detectHookCommand();
-  const usingNpx = hookCommand.startsWith("npx");
-  p.log.info(
-    `Hook command: ${pc.cyan(hookCommand)}${usingNpx ? pc.yellow("  (slow cold-start — consider: bun add -g claudecompress)") : ""}`,
-  );
-
-  const confirm = await p.confirm({
-    message: `Install /compress hook into ${SETTINGS_PATH}?`,
-    initialValue: true,
-  });
-  if (p.isCancel(confirm) || !confirm) return p.cancel("Aborted.");
-
-  const b = backup(SETTINGS_PATH);
-  addHook(settings, hookCommand);
-
-  // Statusline (cache timer) — default on
-  const { cmd: statuslineCmd, viaNpx: statuslineViaNpx } =
-    detectStatuslineCommand();
-  let statuslineInstalled = false;
-  let statuslineSkippedReason: string | null = null;
-
-  const existing = settings.statusLine;
-  const existingIsOurs =
-    existing?.command?.includes(STATUSLINE_TAG) ?? false;
-
-  if (!existing) {
-    settings.statusLine = { type: "command", command: statuslineCmd };
-    statuslineInstalled = true;
-  } else if (existingIsOurs) {
-    settings.statusLine.command = statuslineCmd; // refresh to latest form
-    statuslineInstalled = true;
-  } else {
-    const overwrite = await p.confirm({
-      message: `A custom statusLine is already set (${pc.dim(existing.command ?? JSON.stringify(existing))}). Replace with claudecompress cache timer?`,
-      initialValue: false,
-    });
-    if (p.isCancel(overwrite)) return p.cancel("Aborted.");
-    if (overwrite) {
-      settings.statusLine = { type: "command", command: statuslineCmd };
-      statuslineInstalled = true;
-    } else {
-      statuslineSkippedReason = "kept your existing statusLine";
-    }
+  // Apply changes
+  if (hookDecision.kind === "reinstall") removeHook(settings);
+  if (
+    hookDecision.kind === "install" ||
+    hookDecision.kind === "reinstall"
+  ) {
+    addHook(settings, hookDecision.command);
+    writeSlashCommandFile();
+  }
+  if (statusDecision.kind === "install") {
+    settings.statusLine = { type: "command", command: statusDecision.command };
   }
 
-  mkdirSync(CLAUDE_HOME, { recursive: true });
-  writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
-
-  writeSlashCommandFile();
-
+  const b = writeSettings(settings);
   if (b) p.log.info(`Backed up previous settings to ${b}`);
-  p.log.success(`Installed /compress hook and ${COMMAND_PATH}.`);
-  if (statuslineInstalled) {
+
+  if (
+    hookDecision.kind === "install" ||
+    hookDecision.kind === "reinstall"
+  ) {
     p.log.success(
-      "Installed cache timer statusLine (shows ttl remaining inside claude's UI).",
+      `Installed /compress hook${hookDecision.viaNpx ? pc.dim(" (via npx)") : ""}`,
     );
-    if (statuslineViaNpx) {
+  } else {
+    p.log.warn(hookDecision.reason);
+  }
+  if (statusDecision.kind === "install") {
+    p.log.success(
+      `Installed cache-timer statusLine${statusDecision.viaNpx ? pc.dim(" (via npx)") : ""}`,
+    );
+    if (statusDecision.viaNpx) {
       p.log.info(
         pc.dim(
-          "statusLine uses npx — works fine, but `bun add -g claudecompress` makes it snappier.",
+          "Tip: `bun add -g claudecompress` makes the statusLine refresh snappier.",
         ),
       );
     }
-  } else if (statuslineSkippedReason) {
-    p.log.warn(`Skipped cache timer statusLine — ${statuslineSkippedReason}`);
+  } else {
+    p.log.warn(statusDecision.reason);
   }
-  p.log.info(
-    "Restart Claude Code, then type /compress inside any session to trim it.",
+
+  p.log.info("Restart Claude Code to pick up the new settings.");
+  p.outro(pc.green("Done."));
+}
+
+/**
+ * Standalone installer for the statusLine only. Useful when the user skipped
+ * it during the main install and wants to add it later.
+ */
+export async function installStatusline(): Promise<void> {
+  console.clear();
+  p.intro(pc.bgCyan(pc.black(" claudecompress install-statusline ")));
+
+  let settings: any;
+  try {
+    settings = readSettings();
+  } catch (err) {
+    p.log.error(String(err instanceof Error ? err.message : err));
+    return;
+  }
+
+  const decision = await planStatusline(settings);
+  if (!decision) return p.cancel("Aborted.");
+  if (decision.kind === "skip") {
+    p.log.warn(decision.reason);
+    p.outro("Done.");
+    return;
+  }
+
+  settings.statusLine = { type: "command", command: decision.command };
+  const b = writeSettings(settings);
+  if (b) p.log.info(`Backed up previous settings to ${b}`);
+  p.log.success(
+    `Installed cache-timer statusLine${decision.viaNpx ? pc.dim(" (via npx)") : ""}`,
   );
-  p.log.info(
-    `Usage: /compress  ·  /compress ultra  ·  /compress focus 20  ·  /compress recency 10  ·  /compress smart  ·  /compress truncate 500`,
+  p.log.info("Restart Claude Code to see it.");
+  p.outro(pc.green("Done."));
+}
+
+/**
+ * Standalone installer for the /compress hook only.
+ */
+export async function installHook(): Promise<void> {
+  console.clear();
+  p.intro(pc.bgCyan(pc.black(" claudecompress install-hook ")));
+
+  let settings: any;
+  try {
+    settings = readSettings();
+  } catch (err) {
+    p.log.error(String(err instanceof Error ? err.message : err));
+    return;
+  }
+
+  const decision = await planHook(settings);
+  if (!decision) return p.cancel("Aborted.");
+  if (decision.kind === "skip") {
+    p.log.warn(decision.reason);
+    p.outro("Done.");
+    return;
+  }
+
+  if (decision.kind === "reinstall") removeHook(settings);
+  addHook(settings, decision.command);
+  writeSlashCommandFile();
+  const b = writeSettings(settings);
+  if (b) p.log.info(`Backed up previous settings to ${b}`);
+  p.log.success(
+    `Installed /compress hook${decision.viaNpx ? pc.dim(" (via npx)") : ""}`,
   );
+  p.log.info("Restart Claude Code to pick it up.");
   p.outro(pc.green("Done."));
 }
 
@@ -233,11 +352,12 @@ export async function uninstall(): Promise<void> {
     p.log.info("No claudecompress hook or statusLine found.");
     return;
   }
-  const b = backup(SETTINGS_PATH);
-  writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2));
+  const b = writeSettings(settings);
   if (b) p.log.info(`Backed up previous settings to ${b}`);
   if (removed > 0)
-    p.log.success(`Removed ${removed} claudecompress hook entr${removed === 1 ? "y" : "ies"}.`);
+    p.log.success(
+      `Removed ${removed} claudecompress hook entr${removed === 1 ? "y" : "ies"}.`,
+    );
   if (removedStatusline) p.log.success("Removed claudecompress statusLine.");
   p.outro(pc.green("Done."));
 }
