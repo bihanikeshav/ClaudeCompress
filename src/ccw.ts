@@ -65,10 +65,48 @@ function runClaude(args: string[]): Promise<number> {
   });
 }
 
+/**
+ * Preserve the user's original flags across auto-resume, but:
+ *  - strip any existing --resume / -r / --resume=<id>
+ *  - strip positional args (we don't want to replay an initial prompt)
+ *  - append --resume <hash>
+ *
+ * We can't know which flags take a value (claude's CLI schema isn't public),
+ * so we keep the flag and — if the very next arg doesn't itself start with `-`
+ * — assume it's that flag's value and keep it too. This is correct for the
+ * common flags (`--model <id>`, `--cwd <path>`, etc.) and only misfires if the
+ * user mixed a boolean flag immediately before a positional arg.
+ */
+function mergeResumeArgs(original: string[], hash: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < original.length; i += 1) {
+    const a = original[i]!;
+    if (a === "--resume" || a === "-r") {
+      i += 1; // also skip its value
+      continue;
+    }
+    if (a.startsWith("--resume=")) continue;
+    if (a.startsWith("-")) {
+      out.push(a);
+      if (!a.includes("=")) {
+        const next = original[i + 1];
+        if (next !== undefined && !next.startsWith("-")) {
+          out.push(next);
+          i += 1;
+        }
+      }
+    }
+    // drop bare positional args (initial prompts) — they shouldn't replay
+  }
+  out.push("--resume", hash);
+  return out;
+}
+
 async function main(): Promise<void> {
   ensureDir();
   clearSignal();
-  let args = process.argv.slice(2);
+  const originalArgs = process.argv.slice(2);
+  let args = originalArgs;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const code = await runClaude(args);
@@ -77,7 +115,7 @@ async function main(): Promise<void> {
     process.stdout.write(
       `\n[ccw] resuming trimmed session ${next}\n\n`,
     );
-    args = ["--resume", next];
+    args = mergeResumeArgs(originalArgs, next);
   }
 }
 
