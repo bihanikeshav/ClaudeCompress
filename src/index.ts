@@ -363,11 +363,11 @@ async function main() {
   console.log(pc.dim("Then send a ") + pc.bold("`hi`") + pc.dim(" to force /context to recompute."));
   console.log();
   console.log(
-    pc.dim("Tip: a good moment to run ") +
-      pc.bold("claudecompress") +
-      pc.dim(" is right after you type ") +
+    pc.dim("Tip: when Claude Code suggests ") +
       pc.bold("/clear") +
-      pc.dim(" in an active session — the cache is about to go cold anyway."),
+      pc.dim(" (context pressure), run ") +
+      pc.bold("claudecompress") +
+      pc.dim(" instead — you keep the thread and pay less on cold resume."),
   );
 
   p.outro(pc.green("Done."));

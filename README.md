@@ -21,7 +21,7 @@ Interactive CLI: picks a project, shows each session's size + cache staleness + 
 | Situation | Use it? |
 |---|---|
 | Back after a break (5+ min), big session, about to `/resume` | ✅ yes |
-| Right after you type `/clear` | ✅ yes — cache is about to go cold anyway |
+| Claude Code suggests `/clear` (context pressure) | ✅ yes — trim instead so you keep the thread |
 | Actively mid-session, cache warm | ❌ no — you'd invalidate the live cache |
 | Small session (< 100k tokens) | ⚪ skip — not worth it |
 
@@ -46,15 +46,16 @@ Six modes, pick at runtime:
 
 **Drop-thinking toggle:** any non-Ultra mode can additionally drop `thinking` blocks. Often 200k+ tokens saved on a long session and thinking is never replayed meaningfully on resume.
 
-Real example on a 35 MB / 760k-token Opus session ($11.41 cold):
+Real example on a 760k-token Opus session:
 
-| Mode | Size | Tokens | Cost | Saved |
-|---|---|---|---|---|
-| Redact | 23 MB | 504k | $7.56 | $3.85 |
-| Recency 15 | 23 MB | 501k | $7.52 | $3.89 |
-| Focus 500 | 2.8 MB | 217k | $3.25 | $8.16 |
-| Focus 100 | 1.5 MB | 136k | $2.04 | $9.37 |
-| Ultra | 1.2 MB | 125k | $1.88 | $9.53 |
+| Mode | Tokens | Cold cost | Saved |
+|---|---|---|---|
+| None (baseline) | 760k | $11.41 | — |
+| Redact | 504k | $7.56 | $3.85 |
+| Recency 15 | 501k | $7.52 | $3.89 |
+| Focus 500 | 217k | $3.25 | $8.16 |
+| Focus 100 | 136k | $2.04 | $9.37 |
+| Ultra | 125k | $1.88 | $9.53 |
 
 ## Stack fit
 
