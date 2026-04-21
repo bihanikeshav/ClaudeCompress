@@ -92,6 +92,56 @@ bunx claudecompress history
 
 Shows recent trims, per-trim savings, and a lifetime total. The intro of the interactive flow also surfaces a one-liner like `Lifetime: 7 trims · saved ≈ $42.18`.
 
+## `/compress` slash command (v0.3+)
+
+Install a Claude Code hook so you can run `/compress` from inside any session — no leaving the CLI to trim:
+
+```bash
+bun add -g claudecompress   # recommended, fast hook startup
+claudecompress install
+```
+
+This edits `~/.claude/settings.json` to add a `UserPromptSubmit` hook matched on `^/compress`, and writes `~/.claude/commands/compress.md`. Restart Claude Code once.
+
+Then inside any session:
+
+```
+/compress                    # Redact (default) + drop thinking
+/compress ultra              # dialog-only
+/compress smart              # per-tool rules
+/compress focus 20           # dialog trail + last 20 turns verbatim
+/compress recency 10         # last 10 turns verbatim, redact older
+/compress truncate 500       # keep first 500 chars per tool_result
+```
+
+The hook reports bytes/tokens/USD saved and prints resume commands:
+
+```
+claude --resume <new-hash>
+claude --resume <new-hash> --dangerously-skip-permissions
+```
+
+**Limitation:** `/compress` cannot rewrite the live session in place — that's architecturally locked to `/compact` (only Claude Code itself can mutate its in-memory message buffer). You still Ctrl+C and `--resume` the trimmed copy. See `ccw` below for auto-resume.
+
+Uninstall anytime:
+
+```bash
+claudecompress uninstall
+```
+
+## `ccw` — auto-resume wrapper
+
+`ccw` is a tiny wrapper around the `claude` CLI that makes `/compress` feel seamless: you Ctrl+C once after trim and `ccw` re-invokes `claude --resume <new-hash>` automatically.
+
+```bash
+bun add -g claudecompress
+ccw                          # same args as `claude`, e.g. `ccw --dangerously-skip-permissions`
+```
+
+Under the hood: `ccw` sets a `CCW_SIGNAL_FILE` env var; the hook writes the new session hash to that file on successful trim; `ccw` reads it after claude exits and re-spawns with `--resume <hash>`. When no signal file exists, `ccw` exits normally.
+
+Works cross-platform (Windows, macOS, Linux). Requires the Claude Code CLI (`claude`) on your PATH.
+
 ## Pricing per model
 
 Cost estimate at runtime for Opus 4.7 / Opus 4.6 / Sonnet 4.6 / Haiku 4.5 using each model's actual input rate. Token count is a character-based approximation — Claude's tokenizer isn't public, so estimates are within ~10% of real.

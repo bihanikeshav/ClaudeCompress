@@ -269,6 +269,21 @@ async function main() {
     await runHistory();
     return;
   }
+  if (sub === "hook") {
+    const { runHook } = await import("./hook.ts");
+    await runHook();
+    return;
+  }
+  if (sub === "install") {
+    const { install } = await import("./install.ts");
+    await install();
+    return;
+  }
+  if (sub === "uninstall") {
+    const { uninstall } = await import("./install.ts");
+    await uninstall();
+    return;
+  }
 
   console.clear();
   p.intro(pc.bgCyan(pc.black(" claudecompress ")));
