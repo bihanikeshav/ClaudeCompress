@@ -35,10 +35,14 @@ function detectHookCommand(): string {
     : "npx -y claudecompress hook";
 }
 
-function detectStatuslineCommand(): { cmd: string; viaNpx: boolean } {
-  if (hasGlobalBinary())
-    return { cmd: "claudecompress statusline", viaNpx: false };
-  return { cmd: "npx -y claudecompress statusline", viaNpx: true };
+/**
+ * StatusLine is polled every refreshInterval seconds, so we require a global
+ * install to avoid 500ms npm cold-start tanking every tick. If the binary
+ * isn't on PATH, install skips the statusLine with a clear message pointing
+ * at `bun add -g claudecompress`.
+ */
+function detectStatuslineCommand(): string | null {
+  return hasGlobalBinary() ? "claudecompress statusline" : null;
 }
 
 function readSettings(): any {
@@ -143,12 +147,24 @@ async function planHook(settings: any): Promise<HookDecision | null> {
     : { kind: "skip", reason: "skipped /compress hook (run `claudecompress install-hook` to add later)" };
 }
 
+// Claude Code statusLine supports `refreshInterval` in seconds (min 1) for
+// time-based polling on top of its event-driven refreshes. We always use 1s
+// since we require a global install — cold-start is ~30-50ms, trivial at 1Hz.
+const REFRESH_INTERVAL = 1;
+
 type StatusDecision =
-  | { kind: "install"; command: string; viaNpx: boolean }
+  | { kind: "install"; command: string; refreshInterval: number }
   | { kind: "skip"; reason: string };
 
 async function planStatusline(settings: any): Promise<StatusDecision | null> {
-  const { cmd: command, viaNpx } = detectStatuslineCommand();
+  const command = detectStatuslineCommand();
+  if (!command) {
+    return {
+      kind: "skip",
+      reason:
+        "cache timer needs a global install — run `bun add -g claudecompress` (or `npm i -g claudecompress`), then `claudecompress install-statusline`",
+    };
+  }
   const existing = settings.statusLine;
   const existingIsOurs =
     typeof existing?.command === "string" &&
@@ -161,7 +177,7 @@ async function planStatusline(settings: any): Promise<StatusDecision | null> {
     });
     if (p.isCancel(refresh)) return null;
     return refresh
-      ? { kind: "install", command, viaNpx }
+      ? { kind: "install", command, refreshInterval: REFRESH_INTERVAL }
       : { kind: "skip", reason: "kept existing claudecompress statusLine" };
   }
 
@@ -172,17 +188,17 @@ async function planStatusline(settings: any): Promise<StatusDecision | null> {
     });
     if (p.isCancel(overwrite)) return null;
     return overwrite
-      ? { kind: "install", command, viaNpx }
+      ? { kind: "install", command, refreshInterval: REFRESH_INTERVAL }
       : { kind: "skip", reason: "kept your existing statusLine" };
   }
 
   const go = await p.confirm({
-    message: `Install the cache-timer statusLine?  ${pc.dim(`(${command})`)}`,
+    message: `Install the cache-timer statusLine?  ${pc.dim(`(refresh every ${REFRESH_INTERVAL}s)`)}`,
     initialValue: true,
   });
   if (p.isCancel(go)) return null;
   return go
-    ? { kind: "install", command, viaNpx }
+    ? { kind: "install", command, refreshInterval: REFRESH_INTERVAL }
     : { kind: "skip", reason: "skipped cache timer (run `claudecompress install-statusline` to add later)" };
 }
 
@@ -223,7 +239,11 @@ export async function install(): Promise<void> {
     writeSlashCommandFile();
   }
   if (statusDecision.kind === "install") {
-    settings.statusLine = { type: "command", command: statusDecision.command };
+    settings.statusLine = {
+      type: "command",
+      command: statusDecision.command,
+      refreshInterval: statusDecision.refreshInterval,
+    };
   }
 
   const b = writeSettings(settings);
@@ -241,15 +261,8 @@ export async function install(): Promise<void> {
   }
   if (statusDecision.kind === "install") {
     p.log.success(
-      `Installed cache-timer statusLine${statusDecision.viaNpx ? pc.dim(" (via npx)") : ""}`,
+      `Installed cache-timer statusLine · refresh every ${statusDecision.refreshInterval}s`,
     );
-    if (statusDecision.viaNpx) {
-      p.log.info(
-        pc.dim(
-          "Tip: `bun add -g claudecompress` makes the statusLine refresh snappier.",
-        ),
-      );
-    }
   } else {
     p.log.warn(statusDecision.reason);
   }
@@ -282,11 +295,15 @@ export async function installStatusline(): Promise<void> {
     return;
   }
 
-  settings.statusLine = { type: "command", command: decision.command };
+  settings.statusLine = {
+    type: "command",
+    command: decision.command,
+    refreshInterval: decision.refreshInterval,
+  };
   const b = writeSettings(settings);
   if (b) p.log.info(`Backed up previous settings to ${b}`);
   p.log.success(
-    `Installed cache-timer statusLine${decision.viaNpx ? pc.dim(" (via npx)") : ""}`,
+    `Installed cache-timer statusLine · refresh every ${decision.refreshInterval}s`,
   );
   p.log.info("Restart Claude Code to see it.");
   p.outro(pc.green("Done."));
