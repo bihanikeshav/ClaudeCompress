@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { existsSync } from "node:fs";
@@ -152,26 +152,37 @@ async function pickSession(projectDir: string): Promise<string | null> {
 async function pickMode(): Promise<TrimOptions | null> {
   const mode = await p.select({
     message: "How aggressive?",
+    initialValue: "redact",
     options: [
       {
+        value: "redact",
+        label: `${pc.yellow("Redact")}   ${pc.dim("medium — drop all tool_result bodies, keep structure  [default]")}`,
+      },
+      {
+        value: "recency",
+        label: `${pc.blue("Recency")}  ${pc.dim("keep last N turns verbatim, redact older")}`,
+      },
+      {
+        value: "focus",
+        label: `${pc.cyan("Focus")}    ${pc.dim("dialog trail + last N turns verbatim — between Ultra & Recency")}`,
+      },
+      {
         value: "smart",
-        label: `${pc.magenta("Smart")}    ${pc.dim("per-tool rules — head/tail Read/Bash, keep small state, redact fetches")}`,
+        label: `${pc.magenta("Smart")}    ${pc.dim("light — per-tool rules, preserves Read heads, Bash errors, TodoWrite")}`,
       },
       {
         value: "ultra",
-        label: `${pc.green("Ultra")}    ${pc.dim("dialog only — smallest, breaks tool replay")}`,
-      },
-      {
-        value: "redact",
-        label: `${pc.yellow("Redact")}   ${pc.dim("drop all tool_result bodies, keep structure")}`,
+        label: `${pc.green("Ultra")}    ${pc.dim("heavy — dialog only; tool calls, results, thinking all dropped")}`,
       },
       {
         value: "truncate",
-        label: `${pc.cyan("Truncate")} ${pc.dim("keep first N chars of every tool_result")}`,
+        label: `${pc.cyan("Truncate")} ${pc.dim("manual — keep first N chars of every tool_result")}`,
       },
     ],
   });
   if (p.isCancel(mode)) return null;
+
+  let baseOpts: TrimOptions = { mode: mode as TrimMode };
 
   if (mode === "truncate") {
     const raw = await p.text({
@@ -184,9 +195,31 @@ async function pickMode(): Promise<TrimOptions | null> {
       },
     });
     if (p.isCancel(raw)) return null;
-    return { mode: "truncate" as TrimMode, keepChars: Number(raw) };
+    baseOpts = { mode: "truncate", keepChars: Number(raw) };
+  } else if (mode === "recency" || mode === "focus") {
+    const raw = await p.text({
+      message: "How many recent turns to keep verbatim?",
+      placeholder: "15",
+      initialValue: "15",
+      validate: (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n) || n <= 0) return "Enter a positive number";
+      },
+    });
+    if (p.isCancel(raw)) return null;
+    baseOpts = { mode: mode as TrimMode, keepLastN: Number(raw) };
   }
-  return { mode: mode as TrimMode };
+
+  if (mode !== "ultra") {
+    const drop = await p.confirm({
+      message: "Also drop thinking blocks? (extra savings, safe on resume)",
+      initialValue: true,
+    });
+    if (p.isCancel(drop)) return null;
+    baseOpts.dropThinking = drop;
+  }
+
+  return baseOpts;
 }
 
 function printHistorySummary(): void {

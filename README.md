@@ -3,7 +3,15 @@
 **Shrink Claude Code sessions so cold `/resume` costs less.**
 
 ```bash
-bunx claudecompress
+bunx claudecompress           # bun
+npx claudecompress            # npm
+```
+
+No install required — `bunx`/`npx` fetches the latest release from npm on demand. To keep it around:
+
+```bash
+bun add -g claudecompress     # or: npm i -g claudecompress
+claudecompress
 ```
 
 Interactive CLI: picks a project, shows each session's size + cache staleness + estimated cold-resume cost in USD, lets you trim it. Your source `.jsonl` is never modified — a new session file is written alongside it with a fresh UUID.
@@ -21,18 +29,32 @@ The CLI flags cache state per-session (`warm`, `cold`, `very-cold`) from JSONL m
 
 ## What it does
 
-Four modes, pick at runtime:
+Six modes, pick at runtime:
 
-| Mode | Keeps | Drops | Size ratio |
-|---|---|---|---|
-| **Smart** (default) | per-tool rules — head/tail for `Read`/`Bash`, full for `Edit`/`TodoWrite`, redact for `WebFetch` / MCP Playwright | everything else blanket-redacted | ~60–70% |
-| **Ultra** | user + assistant text turns | tool calls, results, thinking, attachments | 3–10% |
-| **Redact** | full structure, tool names + inputs | tool-result bodies (blanket) | 60–70% |
-| **Truncate N** | structure + first N chars of each tool_result | the rest | tunable |
+| Mode | Weight | Behavior |
+|---|---|---|
+| **Redact** (default) | medium | drop all tool_result bodies, keep full structure |
+| **Recency N** | medium | keep last N turns verbatim (tool_results and all), redact older |
+| **Focus N** | medium–heavy | keep last N turns verbatim + dialog-only trail for everything before |
+| **Smart** | light | per-tool rules — head/tail for `Read`/`Bash`, keep `Edit`/`TodoWrite`, redact `WebFetch` / MCP Playwright |
+| **Ultra** | heavy | user + assistant text turns only; tool calls, results, thinking all dropped |
+| **Truncate N** | manual | keep first N chars of every tool_result |
 
-Smart preserves *signal* (you still see the file you read, errors at the end of a Bash run, what's in your TodoWrite) while cutting bulk. Ultra and Redact are more aggressive; Truncate is the manual knob.
+**Redact** is the safe default — keeps structure and tool names intact, only drops bulky result bodies.
+**Recency** is best for "I want to continue working" — full continuation state for the last N turns.
+**Focus** is the sweet spot between Ultra and Recency — you keep a dialog-only trail of the whole conversation *plus* the last N turns fully intact. Great when Recency is still too heavy and Ultra loses too much.
 
-Real example on a 35 MB / 777k-token Opus session → **Ultra: 1.2 MB / 115k tokens** (~$9.93 saved), **Smart: 23 MB / 628k tokens** (~$2.00 saved, full tool-trail context preserved).
+**Drop-thinking toggle:** any non-Ultra mode can additionally drop `thinking` blocks. Often 200k+ tokens saved on a long session and thinking is never replayed meaningfully on resume.
+
+Real example on a 35 MB / 760k-token Opus session ($11.41 cold):
+
+| Mode | Size | Tokens | Cost | Saved |
+|---|---|---|---|---|
+| Redact | 23 MB | 504k | $7.56 | $3.85 |
+| Recency 15 | 23 MB | 501k | $7.52 | $3.89 |
+| Focus 500 | 2.8 MB | 217k | $3.25 | $8.16 |
+| Focus 100 | 1.5 MB | 136k | $2.04 | $9.37 |
+| Ultra | 1.2 MB | 125k | $1.88 | $9.53 |
 
 ## Stack fit
 

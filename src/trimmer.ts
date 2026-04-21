@@ -1,4 +1,4 @@
-import { createReadStream, createWriteStream } from "node:fs";
+import { createReadStream, createWriteStream, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -189,6 +189,39 @@ function markFirstUser(rec: any): any {
   return copy;
 }
 
+/**
+ * For recency mode: count user+assistant messages, so we can mark which
+ * index crosses the "last N" boundary on the second pass.
+ */
+function countConversationTurns(path: string): number {
+  let n = 0;
+  const data = readFileSync(path, "utf8");
+  for (const line of data.split("\n")) {
+    if (!line) continue;
+    try {
+      const r = JSON.parse(line);
+      if (r.type === "user" || r.type === "assistant") n += 1;
+    } catch {
+      // skip
+    }
+  }
+  return n;
+}
+
+function dropThinkingBlocks(rec: any): any {
+  const msg = rec?.message;
+  if (!msg || typeof msg !== "object" || !Array.isArray(msg.content)) return rec;
+  const filtered = msg.content.filter(
+    (b: any) => !(b && typeof b === "object" && b.type === "thinking"),
+  );
+  if (filtered.length === msg.content.length) return rec;
+  if (filtered.length === 0) {
+    // Would leave an empty message — keep a tiny placeholder so API stays valid
+    filtered.push({ type: "text", text: "[thinking dropped]" });
+  }
+  return { ...rec, message: { ...msg, content: filtered } };
+}
+
 export async function trimSession(
   inputPath: string,
   opts: TrimOptions,
@@ -205,6 +238,13 @@ export async function trimSession(
   let marked = false;
   let lastKeptUuid: string | null = null;
   const toolUseNames = new Map<string, string>();
+
+  const needsTurnCount = opts.mode === "recency" || opts.mode === "focus";
+  const totalTurns = needsTurnCount ? countConversationTurns(inputPath) : 0;
+  const recencyCutoff = needsTurnCount
+    ? Math.max(0, totalTurns - (opts.keepLastN ?? 15))
+    : 0;
+  let turnIndex = 0;
 
   for await (const line of rl) {
     if (!line) continue;
@@ -224,6 +264,36 @@ export async function trimSession(
     } else if (opts.mode === "smart") {
       newRec = trimRecordSmart(rec, newSid, toolUseNames);
       if (!newRec) continue;
+    } else if (opts.mode === "recency") {
+      const isTurn = rec.type === "user" || rec.type === "assistant";
+      const isRecent = isTurn && turnIndex >= recencyCutoff;
+      if (isTurn) turnIndex += 1;
+      newRec = isRecent
+        ? { ...rec, ...(rec.sessionId ? { sessionId: newSid } : {}) }
+        : trimRecordRedact(rec, newSid);
+      if (!newRec) continue;
+    } else if (opts.mode === "focus") {
+      const isTurn = rec.type === "user" || rec.type === "assistant";
+      const currentIdx = isTurn ? turnIndex : -1;
+      if (isTurn) turnIndex += 1;
+      const inRecent = currentIdx >= recencyCutoff;
+
+      if (!isTurn) {
+        // Drop all non-message records in the old phase (attachments, snapshots,
+        // queue ops); keep them verbatim once we're past the cutoff.
+        if (turnIndex < recencyCutoff) continue;
+        newRec = { ...rec };
+        if ("sessionId" in newRec) newRec.sessionId = newSid;
+      } else if (!inRecent) {
+        newRec = ultraTrimRecord(rec, newSid);
+        if (!newRec) continue;
+        newRec.parentUuid = lastKeptUuid;
+        lastKeptUuid = newRec.uuid ?? lastKeptUuid;
+      } else {
+        newRec = { ...rec, sessionId: newSid };
+        newRec.parentUuid = lastKeptUuid ?? newRec.parentUuid ?? null;
+        lastKeptUuid = newRec.uuid ?? lastKeptUuid;
+      }
     } else {
       newRec = trimRecordRedact(
         rec,
@@ -231,6 +301,9 @@ export async function trimSession(
         opts.mode === "truncate" ? opts.keepChars : undefined,
       );
       if (!newRec) continue;
+    }
+    if (opts.dropThinking && opts.mode !== "ultra") {
+      newRec = dropThinkingBlocks(newRec);
     }
     if (!marked && newRec.type === "user") {
       newRec = markFirstUser(newRec);
