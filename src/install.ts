@@ -37,10 +37,14 @@ function detectHookCommand(): string {
     : "npx -y claudecompress hook";
 }
 
-function detectStatuslineCommand(): string | null {
-  // Statusline is invoked frequently; npx cold-start (~500ms+) is unacceptable
-  // here. Only wire it up if a global binary exists.
-  return hasGlobalBinary() ? "claudecompress statusline" : null;
+function detectStatuslineCommand(): { cmd: string; viaNpx: boolean } {
+  // Claude Code invokes the statusline on its own cadence (event-driven after
+  // turns/refreshes, not sub-second polling), and the output is computed from
+  // a timestamp in the JSONL — so we don't poll internally either. That means
+  // npx cold-start only costs one delay per Claude Code refresh, which is
+  // tolerable. Still prefer a global binary when available.
+  if (hasGlobalBinary()) return { cmd: "claudecompress statusline", viaNpx: false };
+  return { cmd: "npx -y claudecompress statusline", viaNpx: true };
 }
 
 function readSettings(): any {
@@ -145,36 +149,32 @@ export async function install(): Promise<void> {
   addHook(settings, hookCommand);
 
   // Statusline (cache timer) — default on
-  const statuslineCmd = detectStatuslineCommand();
+  const { cmd: statuslineCmd, viaNpx: statuslineViaNpx } =
+    detectStatuslineCommand();
   let statuslineInstalled = false;
   let statuslineSkippedReason: string | null = null;
 
-  if (!statuslineCmd) {
-    statuslineSkippedReason =
-      "claudecompress is not on PATH — install globally to enable the cache timer:  bun add -g claudecompress";
-  } else {
-    const existing = settings.statusLine;
-    const existingIsOurs =
-      existing?.command?.includes(STATUSLINE_TAG) ?? false;
+  const existing = settings.statusLine;
+  const existingIsOurs =
+    existing?.command?.includes(STATUSLINE_TAG) ?? false;
 
-    if (!existing) {
+  if (!existing) {
+    settings.statusLine = { type: "command", command: statuslineCmd };
+    statuslineInstalled = true;
+  } else if (existingIsOurs) {
+    settings.statusLine.command = statuslineCmd; // refresh to latest form
+    statuslineInstalled = true;
+  } else {
+    const overwrite = await p.confirm({
+      message: `A custom statusLine is already set (${pc.dim(existing.command ?? JSON.stringify(existing))}). Replace with claudecompress cache timer?`,
+      initialValue: false,
+    });
+    if (p.isCancel(overwrite)) return p.cancel("Aborted.");
+    if (overwrite) {
       settings.statusLine = { type: "command", command: statuslineCmd };
       statuslineInstalled = true;
-    } else if (existingIsOurs) {
-      settings.statusLine.command = statuslineCmd; // refresh to latest form
-      statuslineInstalled = true;
     } else {
-      const overwrite = await p.confirm({
-        message: `A custom statusLine is already set (${pc.dim(existing.command ?? JSON.stringify(existing))}). Replace with claudecompress cache timer?`,
-        initialValue: false,
-      });
-      if (p.isCancel(overwrite)) return p.cancel("Aborted.");
-      if (overwrite) {
-        settings.statusLine = { type: "command", command: statuslineCmd };
-        statuslineInstalled = true;
-      } else {
-        statuslineSkippedReason = "kept your existing statusLine";
-      }
+      statuslineSkippedReason = "kept your existing statusLine";
     }
   }
 
@@ -189,6 +189,13 @@ export async function install(): Promise<void> {
     p.log.success(
       "Installed cache timer statusLine (shows ttl remaining inside claude's UI).",
     );
+    if (statuslineViaNpx) {
+      p.log.info(
+        pc.dim(
+          "statusLine uses npx — works fine, but `bun add -g claudecompress` makes it snappier.",
+        ),
+      );
+    }
   } else if (statuslineSkippedReason) {
     p.log.warn(`Skipped cache timer statusLine — ${statuslineSkippedReason}`);
   }
