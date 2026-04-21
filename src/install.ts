@@ -143,12 +143,22 @@ async function planHook(settings: any): Promise<HookDecision | null> {
     : { kind: "skip", reason: "skipped /compress hook (run `claudecompress install-hook` to add later)" };
 }
 
+// Claude Code statusLine supports `refreshInterval` in seconds (min 1) for
+// time-based polling on top of its event-driven refreshes. We want a live
+// countdown so we set it, but we keep it conservative under npx because the
+// cold-start cost accumulates.
+const REFRESH_INTERVAL_GLOBAL = 1; // smooth per-second countdown
+const REFRESH_INTERVAL_NPX = 10;    // ticks but doesn't hammer CPU
+
 type StatusDecision =
-  | { kind: "install"; command: string; viaNpx: boolean }
+  | { kind: "install"; command: string; viaNpx: boolean; refreshInterval: number }
   | { kind: "skip"; reason: string };
 
 async function planStatusline(settings: any): Promise<StatusDecision | null> {
   const { cmd: command, viaNpx } = detectStatuslineCommand();
+  const refreshInterval = viaNpx
+    ? REFRESH_INTERVAL_NPX
+    : REFRESH_INTERVAL_GLOBAL;
   const existing = settings.statusLine;
   const existingIsOurs =
     typeof existing?.command === "string" &&
@@ -161,7 +171,7 @@ async function planStatusline(settings: any): Promise<StatusDecision | null> {
     });
     if (p.isCancel(refresh)) return null;
     return refresh
-      ? { kind: "install", command, viaNpx }
+      ? { kind: "install", command, viaNpx, refreshInterval }
       : { kind: "skip", reason: "kept existing claudecompress statusLine" };
   }
 
@@ -172,17 +182,17 @@ async function planStatusline(settings: any): Promise<StatusDecision | null> {
     });
     if (p.isCancel(overwrite)) return null;
     return overwrite
-      ? { kind: "install", command, viaNpx }
+      ? { kind: "install", command, viaNpx, refreshInterval }
       : { kind: "skip", reason: "kept your existing statusLine" };
   }
 
   const go = await p.confirm({
-    message: `Install the cache-timer statusLine?  ${pc.dim(`(${command})`)}`,
+    message: `Install the cache-timer statusLine?  ${pc.dim(`(refresh every ${refreshInterval}s)`)}`,
     initialValue: true,
   });
   if (p.isCancel(go)) return null;
   return go
-    ? { kind: "install", command, viaNpx }
+    ? { kind: "install", command, viaNpx, refreshInterval }
     : { kind: "skip", reason: "skipped cache timer (run `claudecompress install-statusline` to add later)" };
 }
 
@@ -223,7 +233,11 @@ export async function install(): Promise<void> {
     writeSlashCommandFile();
   }
   if (statusDecision.kind === "install") {
-    settings.statusLine = { type: "command", command: statusDecision.command };
+    settings.statusLine = {
+      type: "command",
+      command: statusDecision.command,
+      refreshInterval: statusDecision.refreshInterval,
+    };
   }
 
   const b = writeSettings(settings);
@@ -241,12 +255,12 @@ export async function install(): Promise<void> {
   }
   if (statusDecision.kind === "install") {
     p.log.success(
-      `Installed cache-timer statusLine${statusDecision.viaNpx ? pc.dim(" (via npx)") : ""}`,
+      `Installed cache-timer statusLine${statusDecision.viaNpx ? pc.dim(" (via npx)") : ""} · refresh every ${statusDecision.refreshInterval}s`,
     );
     if (statusDecision.viaNpx) {
       p.log.info(
         pc.dim(
-          "Tip: `bun add -g claudecompress` makes the statusLine refresh snappier.",
+          "Tip: `bun add -g claudecompress` lets us drop refresh to 1s for smooth ticking.",
         ),
       );
     }
@@ -282,12 +296,23 @@ export async function installStatusline(): Promise<void> {
     return;
   }
 
-  settings.statusLine = { type: "command", command: decision.command };
+  settings.statusLine = {
+    type: "command",
+    command: decision.command,
+    refreshInterval: decision.refreshInterval,
+  };
   const b = writeSettings(settings);
   if (b) p.log.info(`Backed up previous settings to ${b}`);
   p.log.success(
-    `Installed cache-timer statusLine${decision.viaNpx ? pc.dim(" (via npx)") : ""}`,
+    `Installed cache-timer statusLine${decision.viaNpx ? pc.dim(" (via npx)") : ""} · refresh every ${decision.refreshInterval}s`,
   );
+  if (decision.viaNpx) {
+    p.log.info(
+      pc.dim(
+        "Tip: `bun add -g claudecompress` lets us drop refresh to 1s for smooth ticking.",
+      ),
+    );
+  }
   p.log.info("Restart Claude Code to see it.");
   p.outro(pc.green("Done."));
 }

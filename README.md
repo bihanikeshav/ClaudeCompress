@@ -117,6 +117,12 @@ Also writes `~/.claude/commands/compress.md`. Restart Claude Code once.
 
 It reads the current session's JSONL tail, finds the most recent `message.usage`, detects whether you're using 5-minute or 1-hour cache (from `ephemeral_1h_input_tokens`), compares latest user vs latest assistant timestamps to decide "working" vs "idle", and counts down from the last assistant turn.
 
+The installer sets Claude Code's `statusLine.refreshInterval` so the countdown actually ticks:
+- **Globally installed** (`bun add -g claudecompress`): `refreshInterval: 1` — smooth per-second countdown
+- **Via `npx`**: `refreshInterval: 10` — ticks every 10s to avoid repeated npm cold-start overhead
+
+Claude Code handles the polling — we're reactive, not a daemon.
+
 **Install is per-component** — the installer asks before adding the hook and before adding the statusLine. Skip either at install time and add it later:
 
 ```bash
