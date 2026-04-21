@@ -79,22 +79,7 @@ function printReport(label: string, report: ReturnType<typeof analyze>) {
   }
 }
 
-async function pickProject(): Promise<string | null> {
-  const cwdDir = projectDirForCwd();
-  const useCwd = existsSync(cwdDir);
-
-  const choice = await p.select({
-    message: "Which Claude Code project?",
-    options: [
-      ...(useCwd
-        ? [{ value: "cwd", label: `Current directory  ${pc.dim(`(${cwdDir})`)}` }]
-        : []),
-      { value: "list", label: "Pick from all projects" },
-    ],
-  });
-  if (p.isCancel(choice)) return null;
-  if (choice === "cwd") return cwdDir;
-
+async function pickFromAllProjects(): Promise<string | null> {
   const rows = listProjects();
   if (rows.length === 0) {
     p.log.error("No projects found in ~/.claude/projects");
@@ -111,9 +96,15 @@ async function pickProject(): Promise<string | null> {
   return picked as string;
 }
 
-async function pickSession(projectDir: string): Promise<string | null> {
+async function pickSession(projectDir: string, allowSwitch = true): Promise<string | null> {
   const sessions = listSessions(projectDir);
   if (sessions.length === 0) {
+    if (allowSwitch) {
+      p.log.warn(`No sessions in ${projectDir}`);
+      const other = await pickFromAllProjects();
+      if (!other) return null;
+      return pickSession(other, false);
+    }
     p.log.error(`No .jsonl sessions in ${projectDir}`);
     return null;
   }
@@ -122,17 +113,26 @@ async function pickSession(projectDir: string): Promise<string | null> {
   const latest = sessionInfos[0]!;
   const latestStale = staleness(latest.mtime);
 
-  const choice = await p.select({
-    message: "Which session?",
-    options: [
-      {
-        value: latest.path,
-        label: `${pc.green("Latest")}  ${pc.dim(humanBytes(latest.bytes))}  ${cacheTag(latestStale.state, latestStale.label)}  ${pc.dim(preview(latest.firstUserMessage, 45))}`,
-      },
-      { value: "__browse__", label: "Browse all sessions" },
-    ],
-  });
+  const options: { value: string; label: string }[] = [
+    {
+      value: latest.path,
+      label: `${pc.green("Latest")}  ${pc.dim(humanBytes(latest.bytes))}  ${cacheTag(latestStale.state, latestStale.label)}  ${pc.dim(preview(latest.firstUserMessage, 45))}`,
+    },
+  ];
+  if (sessionInfos.length > 1) {
+    options.push({ value: "__browse__", label: "Browse all sessions in this project" });
+  }
+  if (allowSwitch) {
+    options.push({ value: "__other__", label: pc.dim("Other projects…") });
+  }
+
+  const choice = await p.select({ message: "Which session?", options });
   if (p.isCancel(choice)) return null;
+  if (choice === "__other__") {
+    const other = await pickFromAllProjects();
+    if (!other) return null;
+    return pickSession(other, false);
+  }
   if (choice !== "__browse__") return choice as string;
 
   const picked = await p.select({
@@ -277,10 +277,21 @@ async function main() {
   const model = await pickModel();
   if (!model) return p.cancel("Aborted.");
 
-  const project = await pickProject();
-  if (!project) return p.cancel("Aborted.");
+  const cwdDir = projectDirForCwd();
+  const cwdHasProject = existsSync(cwdDir);
+  if (cwdHasProject) {
+    console.log(pc.dim(`Project: current directory  (${cwdDir})`));
+    console.log();
+  }
 
-  const session = await pickSession(project);
+  const startDir = cwdHasProject ? cwdDir : null;
+  const session = startDir
+    ? await pickSession(startDir, true)
+    : await (async () => {
+        const other = await pickFromAllProjects();
+        if (!other) return null;
+        return pickSession(other, false);
+      })();
   if (!session) return p.cancel("Aborted.");
 
   const sessionInfo = summarizeSession(session);
