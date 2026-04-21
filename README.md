@@ -109,17 +109,25 @@ Also writes `~/.claude/commands/compress.md`. Restart Claude Code once.
 
 **Cache timer** appears inside Claude Code's status line (cross-OS, no terminal hacking — Claude Code renders it natively):
 ```
-◉ agent working · cache refreshing · Opus 4.7
+◉ cache active · agent working · Opus 4.7             # user just submitted, or mid-tool-call
 ◉ cache warm · 5m · 2:47 left · Opus 4.7
 ◉ cache warm · 1h · 47:21 left · Opus 4.7
 ○ cache cold · 12m past · /compress recommended
 ```
 
+The "agent working" state stays active throughout multi-tool-call turns (which can run many minutes) by inspecting each assistant record's `stop_reason` — only `end_turn`, `max_tokens`, `stop_sequence`, and `refusal` start the countdown. `tool_use` and `pause_turn` are treated as mid-turn; unknown values default to terminal (safer: a slightly off countdown beats a stuck "working").
+
 It reads the current session's JSONL tail, finds the most recent `message.usage`, detects whether you're using 5-minute or 1-hour cache (from `ephemeral_1h_input_tokens`), compares latest user vs latest assistant timestamps to decide "working" vs "idle", and counts down from the last assistant turn.
 
 The installer sets Claude Code's `statusLine.refreshInterval: 1` so the countdown ticks every second. Claude Code handles the polling — we're reactive, not a daemon.
 
-> **Global install required for the cache timer.** `claudecompress install` skips the statusLine if the binary isn't on PATH — running via `npx` at 1Hz would eat ~500ms cold-start every second. Install with `bun add -g claudecompress` (or `npm i -g claudecompress`), then run `claudecompress install-statusline` to enable it. The `/compress` hook and everything else work fine via `npx`.
+Between turns, the statusline caches the parsed result in `~/.claude/claudecompress/statusline-cache-<session_id>.json` keyed by the JSONL's mtime + size. Idle ticks just stat the file and reuse the cache — no re-parsing until the JSONL actually changes.
+
+> **Install preferences for the cache timer:**
+> 1. **Global install is required** — at 1Hz, `npx`'s 500ms cold-start eats the CPU. Install with `bun add -g claudecompress` or `npm i -g claudecompress`.
+> 2. **Bun is preferred over node** — the installer detects `bun` on PATH and writes `bun <dist>/index.js statusline` instead of plain `claudecompress statusline`. That drops startup from ~30-50ms to ~10-15ms, so per-second ticks feel smoother.
+>
+> The `/compress` hook and all other features still work fine via `npx` — only the polled statusline is sensitive to startup cost.
 
 **Install is per-component** — the installer asks before adding the hook and before adding the statusLine. Skip either at install time and add it later:
 
