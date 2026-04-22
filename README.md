@@ -111,11 +111,13 @@ Every trim is logged to `~/.claude/claudecompress/history.jsonl`. The interactiv
 | Mode | Weight | Behavior |
 |---|---|---|
 | **Redact** (default) | medium | drop all tool_result bodies, keep full structure |
-| **Recency N** | medium | keep last N turns verbatim, redact older |
-| **Focus N** | medium–heavy | dialog-only trail + last N turns verbatim |
+| **Recency N** | medium | keep last N records verbatim, redact older |
+| **Focus N** | medium–heavy | dialog-only trail + last N records verbatim |
 | **Smart** | light | per-tool rules: Read heads/tails, Bash errors, full Edit/TodoWrite, redact WebFetch and heavy MCP responses |
 | **Ultra** | heavy | user + assistant text only; tools/thinking all dropped |
 | **Truncate N** | manual | keep first N chars of every tool_result |
+
+**N counts JSONL records**, not conversational turns. Each tool call, tool result, user message, and assistant reply is one record. In a tool-heavy session, a single conversational exchange can span 15–30 records — so `Focus 500` ≈ the last 20–30 exchanges kept verbatim, not 500 of them.
 
 **Drop-thinking toggle** (any non-Ultra mode): cuts 200k+ tokens. Claude doesn't re-read prior thinking on resume — free.
 
