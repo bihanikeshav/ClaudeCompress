@@ -24,11 +24,11 @@ Verify the statusLine appears at the bottom of any Claude Code session. Type `/c
 Rendered inside Claude Code's native status line. States:
 
 ```
-◉ cache warm · 5m · 4:32 left · Opus 4.7          plenty of TTL
-◉ cache warm · 5m · 0:58 left · Opus 4.7          under 25% of TTL
-○ cache cold · 12m past · /compress recommended   cache expired, time to trim
-◉ cache active · agent working · Opus 4.7         mid-turn (tool_use, pause_turn)
-◉ new session · cache not yet seeded              pre-first-response
+◉ cache warm · 5m · 4:32 left · Opus 4.7
+◉ cache warm · 5m · 0:58 left · Opus 4.7
+○ cache cold · 12m past · /compress
+◉ cache active · agent working · Opus 4.7
+◉ new session · cache not yet seeded
 ```
 
 **How it works.** Everything comes from fields Claude Code already writes to the session JSONL — no proxy, no API interception.

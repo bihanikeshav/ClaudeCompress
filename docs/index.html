@@ -22,8 +22,8 @@
       --fg: #ebe6dc;
       --fg-dim: #8d887c;
       --fg-dimmer: #4f4a42;
-      --accent: #e5a048;
-      --accent-soft: #a87c40;
+      --accent: #6fa3d1;
+      --accent-soft: #4a7ba0;
       --green: #8fa76c;
       --yellow: #d9a657;
       --red: #c5695e;
@@ -136,11 +136,18 @@
     .state-line .dot { margin-right: 0.55rem; }
     .state-line .sep { color: var(--fg-dimmer); padding: 0 0.45rem; }
     .state-line .faint { color: var(--fg-dim); }
-    .state-line .note { margin-left: auto; padding-left: 1.5rem; color: var(--fg-dimmer); font-style: italic; font-family: "Fraunces", serif; font-size: 12.5px; white-space: nowrap; font-variation-settings: "opsz" 14; }
+    .state-line .chip {
+      background: var(--bg-raised);
+      border: 1px solid var(--rule);
+      border-radius: 3px;
+      padding: 0.05em 0.4em;
+      color: var(--fg);
+      font-size: 0.92em;
+      white-space: nowrap;
+    }
     .state-line.warm .dot, .state-line.warm .label { color: var(--green); }
     .state-line.low .dot, .state-line.low .label { color: var(--yellow); }
     .state-line.cold .dot, .state-line.cold .label { color: var(--red); }
-    .state-line.cold .action { color: var(--accent); }
     .state-line.active .dot, .state-line.active .label { color: var(--cyan); }
 
     /* sections */
@@ -192,7 +199,7 @@
     table tr:last-child td { border-bottom: none; }
     table tr.baseline td { color: var(--fg-dim); }
     table td.saved { color: var(--green); font-weight: 500; }
-    table tr.pick td { background: linear-gradient(90deg, rgba(229,160,72,0.07), rgba(229,160,72,0)); }
+    table tr.pick td { background: linear-gradient(90deg, rgba(111,163,209,0.08), rgba(111,163,209,0)); }
     table tr.pick td.mode { color: var(--accent); }
 
     footer { padding: 2.25rem 0 2.75rem; border-top: 1px solid var(--rule); font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--fg-dimmer); }
@@ -256,20 +263,16 @@
           </div>
           <div class="preview-body">
             <div class="state-line warm">
-              <span><span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span>4:32 left<span class="sep">·</span><span class="faint">Opus 4.7</span></span>
-              <span class="note">plenty of TTL</span>
+              <span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span>4:32 left<span class="sep">·</span><span class="faint">Opus 4.7</span>
             </div>
             <div class="state-line low">
-              <span><span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span>0:58 left<span class="sep">·</span><span class="faint">Opus 4.7</span></span>
-              <span class="note">running low</span>
+              <span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span>0:58 left<span class="sep">·</span><span class="faint">Opus 4.7</span>
             </div>
             <div class="state-line cold">
-              <span><span class="dot">○</span><span class="label">cache cold</span><span class="sep">·</span>12m past<span class="sep">·</span><span class="action">/compress recommended</span></span>
-              <span class="note">trim now</span>
+              <span class="dot">○</span><span class="label">cache cold</span><span class="sep">·</span>12m past<span class="sep">·</span><span class="chip">/compress</span>
             </div>
             <div class="state-line active">
-              <span><span class="dot">◉</span><span class="label">cache active</span><span class="sep">·</span>agent working<span class="sep">·</span><span class="faint">Opus 4.7</span></span>
-              <span class="note">mid-turn</span>
+              <span class="dot">◉</span><span class="label">cache active</span><span class="sep">·</span>agent working<span class="sep">·</span><span class="faint">Opus 4.7</span>
             </div>
           </div>
         </aside>
