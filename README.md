@@ -1,15 +1,16 @@
 # claudecompress
 
-Three things, one install:
+A live **cache-TTL countdown** in your Claude Code status line, and a **trimmer** that keeps cold `/resume` cheap.
+
+Two things, one install:
 
 1. **Cache-TTL status line.** Countdown until your prompt cache expires. Detects 5m vs 1h ephemeral mode.
-2. **`/compress` slash command.** Trim the active session on-demand, inside Claude Code.
-3. **Interactive trimmer** (`bunx claudecompress`). Trim any saved JSONL for cheaper cold `/resume`.
+2. **Trim any session.** Same engine, two entry points: `/compress` inside a Claude Code session trims it on demand, or `bunx claudecompress` trims any saved session retrospectively.
 
 ## Quick start
 
 ```bash
-bun add -g claudecompress     # preferred — see "Runtime preferences" below
+bun add -g claudecompress     # preferred (see "Why global install" below)
 # or
 npm i -g claudecompress
 
@@ -41,9 +42,13 @@ Everything reads from the session JSONL Claude Code already writes. No proxy, no
 - **Client-side commands filtered.** `/context`, `/clear`, `/compact` write user records that never get a reply. Skipped so they don't lock the display into "working".
 - **Polling.** Claude Code ticks the statusLine every second (`refreshInterval: 1`). Parsed state cached at `~/.claude/claudecompress/statusline-cache-<sid>.json`, keyed on JSONL mtime+size. Idle ticks skip the parse.
 
-## `/compress` slash command
+## Trimming
 
-Type it in any Claude Code session. The hook trims the current session's JSONL and prints resume commands.
+Two entry points into the same trim engine.
+
+### Inside a session: `/compress`
+
+Type `/compress` in any session. The hook trims the active session's JSONL and prints a resume command.
 
 ```
 /compress               # Redact (default) + drop thinking
@@ -51,7 +56,7 @@ Type it in any Claude Code session. The hook trims the current session's JSONL a
 /compress focus 15      # keep more recent context
 /compress recency 10    # last 10 user turns verbatim, redact older
 /compress smart         # per-tool rules
-/compress ultra         # nuke it — dialog-only
+/compress ultra         # nuke it; dialog-only
 /compress truncate 500  # keep first 500 chars per tool_result
 ```
 
@@ -59,22 +64,39 @@ Hook output:
 
 ```
 ┌─ claudecompress ────────────────────────────────────────┐
-  mode:   focus (last 20) · dropped thinking
-  tokens: 628.8k → 126.0k   (saved ≈ 502.8k)
-  cold $ $9.43 → $1.89      (saved ≈ $7.54)  [Opus 4.7]
+  mode:   focus (last 5) · dropped thinking
+  tokens: 761k → 217k       (saved ≈ 544k)
+  cold $ $11.41 → $3.25     (saved ≈ $8.16)  [Opus 4.7]
   trimmed session: 17420d99-7152-4359-bfdd-34c2cefe77e3
 └─────────────────────────────────────────────────────────┘
   Exit this session (Ctrl+C), then run:
     claude --resume 17420d99-7152-4359-bfdd-34c2cefe77e3
 ```
 
-Original JSONL is never touched. The trimmed sibling gets a fresh UUID and a `[TRIMMED by claudecompress]` prefix on the first user message — obvious in `/resume`.
+Original JSONL is never touched. The trimmed sibling gets a fresh UUID and a `[TRIMMED by claudecompress]` prefix on the first user message, making it obvious in `/resume`.
 
-The running session can't be mutated from a hook — only `/compact` can, since it's in-process. So you Ctrl+C and `--resume` the new UUID, or use `ccw` to skip that.
+The running session can't be mutated from a hook; only `/compact` can, since it's in-process. So you Ctrl+C and `--resume` the new UUID, or use `ccw` (below) to skip that step.
 
-## `ccw` — auto-resume wrapper
+### Any saved session: `bunx claudecompress`
 
-After `/compress`, Ctrl+C — `ccw` respawns `claude --resume <new-hash>` for you.
+For sessions you didn't trim live, no install needed:
+
+```bash
+bunx claudecompress
+# or: npx claudecompress
+```
+
+Lists the current project's sessions with size, cache staleness (warm/cold/very-cold by mtime), and estimated cold-resume cost. Pick a mode; new JSONL lands next to the original.
+
+```bash
+claudecompress history         # lifetime trim savings
+```
+
+Every trim is logged to `~/.claude/claudecompress/history.jsonl`. The interactive flow shows a one-liner like `Lifetime: 7 trims · saved ≈ $42.18` on launch.
+
+### `ccw`, the auto-resume wrapper
+
+After `/compress`, Ctrl+C, and `ccw` respawns `claude --resume <new-hash>` for you.
 
 ```bash
 ccw                                    # same args as `claude`
@@ -89,62 +111,42 @@ Internals:
 
 Cross-platform (Windows, macOS, Linux). Requires the `claude` CLI on your PATH.
 
-## Interactive trimmer
-
-Trim any saved session, no install:
-
-```bash
-bunx claudecompress
-# or
-npx claudecompress
-```
-
-Lists the current project's sessions with size, cache staleness (warm/cold/very-cold by mtime), and estimated cold-resume cost. Pick a mode; new JSONL lands next to the original.
-
-Also:
-
-```bash
-claudecompress history         # lifetime trim savings
-```
-
-Every trim is logged to `~/.claude/claudecompress/history.jsonl`. The interactive flow shows a one-liner like `Lifetime: 7 trims · saved ≈ $42.18` on launch.
-
 ## Modes
 
 | Mode | Weight | Behavior |
 |---|---|---|
 | **Redact** (default) | medium | drop all tool_result bodies, keep full structure |
 | **Recency N** | medium | keep last N user turns verbatim (with their tool chains), redact older |
-| **Focus N** | medium–heavy | dialog-only trail for older turns + last N user turns verbatim |
+| **Focus N** | medium to heavy | dialog-only trail for older turns + last N user turns verbatim |
 | **Smart** | light | per-tool rules: Read heads/tails, Bash errors, full Edit/TodoWrite, redact WebFetch and heavy MCP responses |
 | **Ultra** | heavy | user + assistant text only; tools/thinking all dropped |
 | **Truncate N** | manual | keep first N chars of every tool_result |
 
 **N counts your user messages**, not JSONL records. Each time you send a message, everything the agent does in response (tool calls, tool results, thinking, reply) is one "user turn". `Focus 5` keeps the last 5 back-and-forths verbatim; anything before is compressed to a dialog-only trail.
 
-**Drop-thinking toggle** (any non-Ultra mode): cuts 200k+ tokens. Claude doesn't re-read prior thinking on resume — free.
+**Drop-thinking toggle** (any non-Ultra mode): cuts 200k+ tokens. Claude doesn't re-read prior thinking on resume; it's free savings.
 
-Real savings on a 761k-token Opus session (153 user turns). **Focus 5 is the recommended default** — keeps your last 5 exchanges verbatim, dialog-only trail for everything older, cuts cold-resume cost by ~70%.
+Real savings on a 761k-token Opus session (153 user turns). **Focus 5 is the recommended default**: keeps your last 5 exchanges verbatim, dialog-only trail for everything older, cuts cold-resume cost by ~70%.
 
 | Mode | Tokens | Cold cost | Saved |
 |---|---|---|---|
-| None (baseline) | 761k | $11.41 | — |
+| None (baseline) | 761k | $11.41 | · |
 | Redact | 503k | $7.54 | $3.87 |
 | Recency 15 | 574k | $8.61 | $2.80 |
 | Focus 15 | 327k | $4.91 | $6.50 |
-| **Focus 5** ← recommended | **217k** | **$3.25** | **$8.16** |
+| **Focus 5** (recommended) | **217k** | **$3.25** | **$8.16** |
 | Ultra | 125k | $1.88 | $9.53 |
 
-Cost estimates use each model's actual input rate (Opus 4.7/4.6, Sonnet 4.6, Haiku 4.5). Token count is a char-based approximation — within ~10% of Anthropic's tokenizer.
+Cost estimates use each model's actual input rate (Opus 4.7/4.6, Sonnet 4.6, Haiku 4.5). Token count is a char-based approximation, within ~10% of Anthropic's tokenizer.
 
 ## When to trim
 
 | Situation | Trim? |
 |---|---|
 | Back after a break (5+ min), big session, about to `/resume` | ✅ yes |
-| Claude Code suggests `/clear` (context pressure) | ✅ yes — trim instead so you keep the thread |
-| Actively mid-session, cache warm | ❌ no — you'd invalidate the live cache |
-| Small session (<100k tokens) | ⚪ skip — not worth it |
+| Claude Code suggests `/clear` (context pressure) | ✅ yes, trim instead so you keep the thread |
+| Actively mid-session, cache warm | ❌ no, you'd invalidate the live cache |
+| Small session (<100k tokens) | ⚪ skip, not worth it |
 
 The interactive trimmer flags session cache state per-row (`warm` / `cold` / `very-cold`) from JSONL mtime and defaults "no" on warm ones.
 
@@ -153,7 +155,7 @@ The interactive trimmer flags session cache state per-row (`warm` / `cold` / `ve
 Per-component, all go to `~/.claude/settings.json` (backed up to `settings.json.claudecompress.bak` first):
 
 ```bash
-claudecompress install              # interactive — asks about each piece separately
+claudecompress install              # interactive: asks about each piece separately
 claudecompress install-hook         # just the /compress slash command
 claudecompress install-statusline   # just the cache timer
 claudecompress uninstall            # remove everything we added, keep backup
@@ -163,11 +165,11 @@ Existing custom `statusLine` entries are never overwritten without explicit conf
 
 ### Why global install (and bun)
 
-The statusLine ticks every second. Under `npx`, each tick eats ~500ms of npm cold-start — half a CPU for nothing. Global install runs in 10–50ms. Installer skips the statusLine if `claudecompress` isn't on PATH.
+The statusLine ticks every second. Under `npx`, each tick eats ~500ms of npm cold-start: half a CPU for nothing. Global install runs in 10–50ms. Installer skips the statusLine if `claudecompress` isn't on PATH.
 
 **Bun is preferred over node.** ~3× faster startup (~10–15 ms vs ~30–50 ms). Installer detects `bun` on PATH and writes `bun <dist>/index.js statusline` automatically.
 
-The `/compress` hook is fine under `npx` — it fires once per user-typed `/compress`, not continuously.
+The `/compress` hook is fine under `npx`; it fires once per user-typed `/compress`, not continuously.
 
 ## Architecture notes
 
@@ -182,7 +184,7 @@ The `/compress` hook is fine under `npx` — it fires once per user-typed `/comp
 |---|---|---|
 | [rtk](https://github.com/rtk-ai/rtk) | Bash output compression at ingress | During session |
 | [context-mode](https://github.com/mksglu/context-mode) | MCP sandbox + SQLite-backed tool output | During session |
-| **claudecompress** | Cache visibility + `/compress` + retrospective trimming | Anytime |
+| **claudecompress** | Cache visibility + session trimming | Anytime |
 
 rtk and context-mode stop new bloat at ingress. claudecompress shows cache state and cleans bloat that's already in the session: thinking blocks, native `Read`/`Grep`, non-sandboxed MCP, long existing sessions.
 

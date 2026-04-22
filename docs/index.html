@@ -3,48 +3,61 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>claudecompress — cache timer &amp; /compress for Claude Code</title>
+  <title>claudecompress · cache timer &amp; /compress for Claude Code</title>
   <meta name="description" content="A live cache-TTL status line, a /compress slash command, and an offline trimmer for Claude Code." />
-  <meta name="color-scheme" content="light" />
-  <meta name="theme-color" content="#f2ecdf" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#0f0d0a" />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="claudecompress" />
   <meta property="og:description" content="Cache timer, /compress, and a trimmer for Claude Code." />
   <meta property="og:url" content="https://bihanikeshav.github.io/ClaudeCompress/" />
   <meta name="twitter:card" content="summary" />
+
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='10.5' fill='none' stroke='%237fb8b5' stroke-width='2.4'/><circle cx='16' cy='16' r='4.5' fill='%237fb8b5'/></svg>" />
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,0..100;1,9..144,300..900,0..100&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+
   <style>
     :root {
-      /* Paper & ink — slightly less yellow, more balanced */
-      --paper:      #f4ede0;
-      --paper-tint: #ede2c8;
-      --paper-rise: #e3d6b6;
-      --ink:        #1a1512;
-      --ink-soft:   #39302a;
-      --ink-dim:    #6e6358;
-      --ink-fade:   #9f9280;
-      --rule:       #d4c5a3;
-      --rule-strong:#b6a37a;
+      /* Warm pewter — dark metallic gray with a hint of brown so it sits
+         in the same tonal family as the cream text and coral accent.
+         Pure neutral gray (#131313) looks flat against the warm content;
+         this subtle warm shift unifies the palette. */
+      --bg:          #141311;
+      --rule:        #2c2a26;
 
-      /* Single accent: deeper Prussian blue, richer contrast on cream */
-      --accent:     #183a5c;
-      --accent-dim: #3f5e7d;
+      /* Text — warm cream, reads like paper on dark ink */
+      --fg:          #ece4d0;
+      --fg-soft:     #c4b99f;
+      --fg-dim:      #877e69;
+      --fg-fade:     #564e40;
 
-      /* State palette — muted earth tones */
-      --state-ok:     #516c2e;  /* forest olive */
-      --state-warn:   #9c6f1d;  /* ochre */
-      --state-err:    #8a3a2b;  /* brick */
-      --state-active: #2b6574;  /* slate teal */
+      /* Single accent: Anthropic coral (Claude Code's logo color).
+         No competing Prussian blue, no cyan-on-dark slop. */
+      --accent:      #e2704c;
+      --accent-soft: #a75438;
+      --accent-tint: rgba(226, 112, 76, 0.12);
+
+      /* Brand mark / favicon — teal, borrowed from the "active" state color */
+      --brand:       #7fb8b5;
+
+      /* State colors for the cache preview — semantic, not decorative.
+         Tuned to read on dark warm bg without going neon. */
+      --state-ok:     #a4c27a;
+      --state-warn:   #e0b45c;
+      --state-err:    #d27564;
+      --state-active: #7fb8b5;
+
     }
 
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
     body {
       margin: 0;
-      background: var(--paper);
-      color: var(--ink);
+      background: var(--bg);
+      color: var(--fg);
       font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
       font-size: 17px;
       line-height: 1.6;
@@ -52,20 +65,33 @@
       font-feature-settings: "kern", "liga", "ss01";
       text-rendering: optimizeLegibility;
     }
-    ::selection { background: var(--accent); color: var(--paper); }
+    ::selection { background: var(--accent); color: var(--bg); }
 
-    /* subtle parchment tone gradient — barely visible, adds warmth */
+    /* Cool teal ambient from hero top — complements the warm coral ASCII */
     body::before {
+      content: "";
+      position: fixed;
+      inset: 0 0 auto 0;
+      height: 70vh;
+      pointer-events: none;
+      background: radial-gradient(
+        ellipse 85% 100% at 18% 0%,
+        rgba(127, 184, 181, 0.13) 0%,
+        rgba(127, 184, 181, 0) 55%
+      );
+      z-index: 0;
+    }
+    /* Film-grain texture — fine SVG fractal noise, very low opacity.
+       Adds paper/photograph feel; imperceptible on text at 0.06. */
+    body::after {
       content: "";
       position: fixed;
       inset: 0;
       pointer-events: none;
-      background: radial-gradient(
-        ellipse at 50% 0%,
-        rgba(242, 231, 201, 0.5) 0%,
-        rgba(242, 231, 201, 0) 60%
-      );
       z-index: 0;
+      opacity: 0.06;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.8 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+      background-size: 200px 200px;
     }
     body > * { position: relative; z-index: 1; }
 
@@ -74,31 +100,44 @@
     /* Typography */
     h1, h2 {
       font-family: "Fraunces", "Times New Roman", serif;
-      font-weight: 420;
-      letter-spacing: -0.018em;
-      line-height: 1.04;
+      font-weight: 400;
+      letter-spacing: -0.022em;
+      line-height: 1.05;
       margin: 0;
-      color: var(--ink);
-      font-variation-settings: "opsz" 144, "SOFT" 30;
+      color: var(--fg);
+      font-variation-settings: "opsz" 144, "SOFT" 40;
     }
-    h1 { font-size: clamp(2.5rem, 6.8vw, 5rem); font-weight: 380; letter-spacing: -0.024em; }
-    h2 { font-size: clamp(1.65rem, 3.6vw, 2.4rem); font-weight: 440; }
-    .italic { font-family: "Fraunces", serif; font-style: italic; font-weight: 380; }
+    h1 { font-size: clamp(2.25rem, 5.5vw, 4.25rem); font-weight: 380; letter-spacing: -0.028em; }
+    h2 { font-size: clamp(1.7rem, 3.5vw, 2.4rem); font-weight: 440; }
+    .italic { font-family: "Fraunces", serif; font-style: italic; font-weight: 380; font-variation-settings: "opsz" 72, "SOFT" 70; }
     .accent { color: var(--accent); }
+    /* Dual accent: italic emphasis in headers = teal (brand),
+       everything else with .accent stays coral. */
+    h1 .italic, h2 .italic { color: var(--brand); }
 
     code, pre, .mono {
       font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
       font-feature-settings: "calt", "liga";
     }
+    /* Unified inline code chip — consistent across lede, intro, aside */
     p code {
-      background: var(--paper-rise);
+      background: #000;
       border: 1px solid var(--rule);
-      padding: 0.03em 0.36em;
-      border-radius: 2px;
-      font-size: 0.86em;
-      color: var(--ink);
+      padding: 0.05em 0.4em;
+      border-radius: 3px;
+      font-size: 0.88em;
+      color: var(--fg);
+      font-variant-numeric: tabular-nums;
     }
     pre { margin: 0; white-space: pre; }
+
+    /* Universal focus style — visible outline for keyboard users,
+       invisible for mouse clicks (:focus-visible). */
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+      border-radius: 2px;
+    }
 
     /* Header */
     header {
@@ -106,85 +145,163 @@
       padding: 1rem 0;
       font-family: "IBM Plex Mono", monospace;
       font-size: 12.5px;
-      color: var(--ink-dim);
+      color: var(--fg-dim);
     }
-    header .wrap { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
-    header .brand { color: var(--ink); font-weight: 500; letter-spacing: -0.005em; }
-    header .brand .mark { color: var(--accent); font-weight: 600; margin-right: 0.45em; }
+    header .wrap {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    header .brand {
+      color: var(--fg);
+      font-weight: 500;
+      letter-spacing: -0.005em;
+    }
+    header .brand .mark {
+      color: var(--brand);
+      font-weight: 600;
+      margin-right: 0.4em;
+    }
     header .meta { display: flex; gap: 0.85rem; align-items: center; }
-    header a { color: var(--ink-dim); text-decoration: none; transition: color 180ms ease; }
-    header a:hover { color: var(--accent); }
-    .dot-sep { color: var(--ink-fade); }
-
-    /* Sections */
-    section {
-      padding: clamp(3.25rem, 8vw, 5.5rem) 0;
-      border-top: 1px solid var(--rule);
+    header a {
+      color: var(--fg-dim);
+      text-decoration: none;
+      transition: color 180ms ease;
     }
+    header a:hover { color: var(--accent); }
+    .dot-sep { color: var(--fg-fade); }
+
+    /* Sections — single-rule dividers via section::before, tighter rhythm */
+    main > section {
+      padding: clamp(2.25rem, 5vw, 3.75rem) 0;
+      position: relative;
+    }
+    main > section + section::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: clamp(1.5rem, 4vw, 3rem);
+      right: clamp(1.5rem, 4vw, 3rem);
+      height: 1px;
+      background: var(--rule);
+    }
+
     section.hero {
-      border-top: none;
-      padding-top: clamp(3.5rem, 9vw, 6rem);
-      padding-bottom: clamp(3.5rem, 9vw, 6rem);
+      padding-top: clamp(3rem, 6.5vw, 4.75rem);
+      padding-bottom: clamp(2.75rem, 6vw, 4.25rem);
     }
 
     .kicker {
       font-family: "IBM Plex Mono", monospace;
       font-size: 11px;
       color: var(--accent);
-      letter-spacing: 0.22em;
+      letter-spacing: 0.24em;
       text-transform: uppercase;
-      margin-bottom: 1.4rem;
+      margin: 0 0 1.5rem;
       font-weight: 500;
     }
 
-    /* Hero grid */
-    .hero-grid {
+    /* ASCII "CLAUDE CODE" hero mark — ANSI Shadow figlet, no bloom. */
+    .cc-ascii {
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: clamp(0.44rem, 0.88vw, 0.72rem);
+      line-height: 1.05;
+      color: var(--accent);
+      margin: 0 0 0.35rem;
+      white-space: pre;
+      overflow-x: auto;
+      overflow-y: hidden;
+      font-weight: 400;
+      letter-spacing: 0;
+      scrollbar-width: none;
+    }
+    .cc-ascii::-webkit-scrollbar { display: none; }
+
+    /* Hero split: text on the left, status-line preview on the right.
+       ASCII art sits above the split, spans full width. */
+    .hero-below {
       display: grid;
       grid-template-columns: 1fr;
-      gap: clamp(2.75rem, 6vw, 4.5rem);
+      gap: clamp(2.5rem, 5vw, 3.5rem);
       align-items: start;
     }
     @media (min-width: 920px) {
-      .hero-grid { grid-template-columns: 1.15fr 1fr; align-items: center; }
+      .hero-below {
+        grid-template-columns: 1.1fr 1fr;
+        gap: clamp(2.5rem, 5vw, 4rem);
+        align-items: center;
+      }
     }
 
-    .hero h1 { margin-bottom: 1.6rem; max-width: 14ch; }
+    .hero h1 {
+      max-width: 18ch;
+      margin: 0 0 1.6rem;
+    }
     .hero .lede {
-      max-width: 48ch;
-      font-size: clamp(1.05rem, 1.35vw, 1.18rem);
-      color: var(--ink-soft);
+      max-width: 44ch;
+      font-size: clamp(1.05rem, 1.3vw, 1.18rem);
+      color: var(--fg-soft);
       line-height: 1.58;
-      margin: 0 0 2.4rem;
+      margin: 0 0 2.2rem;
     }
     .hero .lede em {
-      color: var(--accent);
       font-style: normal;
       font-weight: 500;
+      color: var(--brand);
+    }
+    .hero .lede code {
+      background: #000;
+      border: 1px solid var(--rule);
+      padding: 0.05em 0.4em;
+      border-radius: 3px;
+      font-size: 0.88em;
+      color: var(--fg);
     }
 
-    /* Install command "card" */
-    .install { display: flex; flex-direction: column; gap: 0.55rem; max-width: 520px; }
+    /* Install commands — accessible <button> with reset + custom styling */
+    .install {
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+      max-width: 520px;
+    }
     .cmd {
+      /* button reset */
+      appearance: none;
+      font: inherit;
+      text-align: left;
+      width: 100%;
+      /* layout */
+      position: relative;
+      overflow: hidden;
       display: flex;
       align-items: center;
       gap: 0.9rem;
-      background: var(--paper-tint);
-      border: 1px solid var(--rule-strong);
-      border-radius: 3px;
-      padding: 0.7rem 0.95rem;
+      background: #000;
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      padding: 0.72rem 0.95rem;
       font-family: "IBM Plex Mono", monospace;
       font-size: 13.5px;
+      color: var(--fg);
       cursor: pointer;
-      transition: border-color 180ms ease, background 180ms ease;
+      transition: border-color 180ms ease;
       user-select: none;
     }
-    .cmd:hover { border-color: var(--accent); background: var(--paper-rise); }
-    .cmd .prompt { color: var(--ink-fade); }
-    .cmd .code { color: var(--ink); flex: 1; }
+    .cmd:hover,
+    .cmd:focus-visible {
+      border-color: var(--accent-soft);
+    }
+    .cmd:focus-visible { outline-offset: 2px; }
+    .cmd:active { transform: translateY(0.5px); }
+    .cmd .prompt { color: var(--fg-fade); }
+    .cmd .code { color: var(--fg); flex: 1; }
     .cmd .copy {
-      color: var(--ink-dim);
+      color: var(--fg-dim);
       font-size: 10.5px;
-      letter-spacing: 0.15em;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
       transition: color 180ms ease;
     }
@@ -201,48 +318,56 @@
       flex-wrap: wrap;
     }
     .cta-row a {
-      color: var(--ink-dim);
+      color: var(--fg-dim);
       text-decoration: none;
       border-bottom: 1px solid transparent;
       padding-bottom: 2px;
       transition: color 180ms ease, border-color 180ms ease;
     }
-    .cta-row a:hover { color: var(--accent); border-color: var(--accent); }
+    .cta-row a:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
 
-    /* Preview panel — printed spec card */
+    /* Status line preview — pure black surface, contrasts warm-dark page */
     .preview {
-      background: var(--paper-tint);
-      border: 1px solid var(--rule-strong);
-      border-radius: 3px;
+      max-width: 520px;
+      background: #000;
+      color: var(--fg);
+      border: 1px solid var(--rule);
+      border-radius: 10px;
       overflow: hidden;
+      box-shadow:
+        0 10px 32px rgba(0, 0, 0, 0.5),
+        0 2px 8px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+    @media (max-width: 919px) {
+      .preview { margin-top: clamp(2rem, 4vw, 3rem); }
     }
     .preview-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
       padding: 0.55rem 1.1rem;
-      border-bottom: 1px solid var(--rule-strong);
-      background: var(--paper-rise);
+      border-bottom: 1px solid var(--rule);
       font-family: "IBM Plex Mono", monospace;
       font-size: 10.5px;
-      color: var(--ink-dim);
+      color: var(--fg-dim);
       letter-spacing: 0.18em;
       text-transform: uppercase;
       font-weight: 500;
     }
-    .preview-head .fig {
-      color: var(--accent);
-      letter-spacing: 0.14em;
-    }
     .preview-body {
-      padding: 1.35rem 1.35rem 1.45rem;
+      padding: 1.3rem 1.35rem 1.4rem;
       font-family: "IBM Plex Mono", monospace;
       font-size: 13px;
       line-height: 2.15;
+      color: var(--fg);
+      font-variant-numeric: tabular-nums;
     }
-    .state-line { display: flex; align-items: baseline; flex-wrap: wrap; }
-    /* Fixed slot for the state dot so ◉ (filled) and ○ (hollow) glyphs,
-       which have different metrics in monospace fonts, align cleanly. */
+    .state-line {
+      display: flex;
+      align-items: baseline;
+      flex-wrap: wrap;
+    }
     .state-line .dot {
       display: inline-block;
       width: 1.15ch;
@@ -250,140 +375,288 @@
       margin-right: 0.55rem;
       font-size: 1em;
     }
-    .state-line .sep { color: var(--ink-fade); padding: 0 0.45rem; }
-    .state-line .faint { color: var(--ink-dim); }
+    .state-line .sep { color: var(--fg-fade); padding: 0 0.45rem; }
+    .state-line .faint { color: var(--fg-dim); }
     .state-line .chip {
-      background: var(--paper);
-      border: 1px solid var(--rule-strong);
+      background: #000;
+      border: 1px solid var(--rule);
       border-radius: 2px;
       padding: 0.05em 0.42em;
-      color: var(--ink);
+      margin-left: 0.28em;
+      color: var(--fg);
       font-size: 0.94em;
       white-space: nowrap;
     }
+    #hero-countdown, #hero-countdown-low { margin-right: 0.28em; }
     .state-line.warm   .dot, .state-line.warm .label   { color: var(--state-ok); }
     .state-line.low    .dot, .state-line.low .label    { color: var(--state-warn); }
     .state-line.cold   .dot, .state-line.cold .label   { color: var(--state-err); }
     .state-line.active .dot, .state-line.active .label { color: var(--state-active); }
     .state-line .label { font-weight: 500; }
 
-    /* Section content */
+    /* Section tag — mono uppercase label, no numbering */
     .sec-tag {
       font-family: "IBM Plex Mono", monospace;
-      font-size: 10.5px;
-      color: var(--ink-dim);
+      font-size: 11px;
+      color: var(--fg-dim);
       letter-spacing: 0.22em;
       text-transform: uppercase;
-      margin-bottom: 1.35rem;
+      margin-bottom: 1.6rem;
       display: flex;
-      align-items: center;
-      gap: 1.1rem;
+      align-items: baseline;
+      gap: 0.9rem;
       font-weight: 500;
     }
-    .sec-tag .num { color: var(--accent); }
-    .sec-tag::after {
-      content: "";
-      flex: 1;
-      height: 1px;
-      background: var(--rule);
+    .sec-tag .num { display: none; }
+    section h2 {
+      margin-bottom: 1rem;
+      max-width: 22ch;
     }
-    section h2 { margin-bottom: 1rem; max-width: 22ch; color: var(--ink); }
     .intro {
       max-width: 60ch;
-      color: var(--ink-soft);
+      color: var(--fg-soft);
       margin: 0 0 2rem;
-      line-height: 1.62;
+      line-height: 1.6;
       font-size: 1.02rem;
     }
+    .intro code { background: #000; border: 1px solid var(--rule); padding: 0.03em 0.36em; border-radius: 2px; font-size: 0.9em; color: var(--fg); }
     .aside-note {
       max-width: 58ch;
-      color: var(--ink-dim);
+      color: var(--fg-dim);
       font-size: 0.95rem;
       line-height: 1.55;
       margin: -0.75rem 0 2rem;
     }
+    .aside-note code { background: #000; border: 1px solid var(--rule); padding: 0.03em 0.36em; border-radius: 2px; font-size: 0.9em; color: var(--fg-soft); }
 
-    /* Section split */
-    .split { display: grid; grid-template-columns: 1fr; gap: clamp(1.75rem, 4vw, 3.25rem); align-items: start; }
+    /* Section split — text on left, demo on right */
+    .split {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: clamp(1.75rem, 4vw, 3rem);
+      align-items: start;
+    }
     @media (min-width: 880px) {
-      .split { grid-template-columns: 0.9fr 1.1fr; gap: 3.25rem; align-items: center; }
+      .split { grid-template-columns: 0.9fr 1.1fr; gap: 3rem; align-items: center; }
     }
 
-    /* Boxes */
+    /* Two-demo row — /compress + bunx commands side by side */
+    .demo-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: clamp(1.5rem, 3vw, 2rem);
+      margin-top: 2.25rem;
+    }
+    @media (min-width: 880px) {
+      .demo-row { grid-template-columns: 1fr 1fr; gap: 1.75rem; align-items: start; }
+    }
+    .demo-label {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 10px;
+      color: var(--fg-dim);
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      margin: 0 0 0.7rem;
+      font-weight: 500;
+    }
+    .demo-row .codeblock { max-width: none; }
+
+    /* Code blocks — pure black surface, contrasts warm-dark page */
     .box, .codeblock {
-      background: var(--paper-tint);
-      border: 1px solid var(--rule-strong);
-      border-radius: 3px;
-      padding: 1.25rem 1.5rem;
+      background: #000;
+      border: 1px solid var(--rule);
+      border-radius: 10px;
+      padding: 1.3rem 1.5rem;
       font-family: "IBM Plex Mono", monospace;
       font-size: 12.8px;
-      line-height: 1.9;
+      line-height: 1.85;
       overflow-x: auto;
-      color: var(--ink);
+      white-space: pre;
+      color: var(--fg);
+      box-shadow:
+        0 8px 28px rgba(0, 0, 0, 0.5),
+        0 2px 6px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
     }
-    .box .dim, .codeblock .comment, .codeblock .prompt { color: var(--ink-fade); }
+    .codeblock { max-width: 640px; }
+    .box .dim, .codeblock .comment, .codeblock .prompt { color: var(--fg-fade); }
     .box .accent { color: var(--accent); }
     .box .savings { color: var(--state-ok); font-weight: 500; }
-    .codeblock { max-width: 640px; }
 
-    /* Table */
-    table { width: 100%; border-collapse: collapse; font-family: "IBM Plex Mono", monospace; font-size: 13.5px; }
+    /* Table — wrap in scroll container for narrow screens */
+    .table-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      /* subtle fade mask on the right edge to signal scrollability */
+      mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 20px), transparent 100%);
+      -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 20px), transparent 100%);
+    }
+    @media (min-width: 520px) {
+      .table-wrap { mask-image: none; -webkit-mask-image: none; }
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 13.5px;
+      font-variant-numeric: tabular-nums;
+      min-width: 440px;  /* never squash past readable */
+    }
     table th {
       text-align: left;
-      padding: 0.65rem 0.95rem 0.75rem;
-      color: var(--ink-dim);
+      padding: 0.7rem 0.95rem 0.85rem;
+      color: var(--fg-dim);
       font-weight: 500;
       font-size: 10.5px;
-      letter-spacing: 0.2em;
+      letter-spacing: 0.22em;
       text-transform: uppercase;
-      border-bottom: 1.5px solid var(--rule-strong);
+      border-bottom: 1.5px solid var(--rule);
     }
-    table th:nth-child(n+2), table td:nth-child(n+2) { text-align: right; }
+    table th:nth-child(n+2),
+    table td:nth-child(n+2) { text-align: right; }
     table td {
-      padding: 0.78rem 0.95rem;
+      padding: 0.8rem 0.95rem;
       border-bottom: 1px solid var(--rule);
-      color: var(--ink);
+      color: var(--fg);
     }
     table tr:last-child td { border-bottom: none; }
-    table tr.baseline td { color: var(--ink-dim); font-style: italic; font-family: "Fraunces", serif; }
-    table tr.baseline td.mode { font-style: italic; }
+    table tr.baseline td { color: var(--fg-dim); }
     table td.saved { color: var(--state-ok); font-weight: 500; }
     table tr.pick td {
-      background: linear-gradient(90deg, rgba(31, 61, 90, 0.09), rgba(31, 61, 90, 0.01));
+      background: linear-gradient(90deg, var(--accent-tint), transparent 80%);
     }
-    table tr.pick td.mode { color: var(--accent); font-weight: 500; }
-    table tr.pick td.mode::before { content: "→ "; color: var(--accent); margin-right: 0.1rem; }
+    table tr.pick td.mode {
+      color: var(--accent);
+      font-weight: 500;
+    }
+    table tr.pick td.mode::before {
+      content: "→ ";
+      color: var(--accent);
+      margin-right: 0.1rem;
+    }
 
     /* Footer */
     footer {
-      padding: 2.5rem 0 3rem;
+      padding: 2.4rem 0 3rem;
       border-top: 1px solid var(--rule);
       font-family: "IBM Plex Mono", monospace;
       font-size: 11.5px;
-      color: var(--ink-fade);
+      color: var(--fg-fade);
     }
     footer .wrap {
       display: flex;
       justify-content: space-between;
       align-items: baseline;
       flex-wrap: wrap;
-      gap: 0.9rem;
+      gap: 0.8rem;
     }
-    footer a { color: var(--ink-dim); text-decoration: none; transition: color 180ms ease; }
+    footer a {
+      color: var(--fg-dim);
+      text-decoration: none;
+      transition: color 180ms ease;
+    }
     footer a:hover { color: var(--accent); }
 
+    /* ====== Animation layer ====== */
+
+    /* Hero entrance — staggered fade + gentle up-shift on page load.
+       ASCII leads, H1 follows 120ms later, etc. No typewriter. */
+    @keyframes reveal-in {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .hero .cc-ascii  { animation: reveal-in 700ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+    .hero h1         { animation: reveal-in 700ms cubic-bezier(0.16, 1, 0.3, 1) 140ms both; }
+    .hero .lede      { animation: reveal-in 700ms cubic-bezier(0.16, 1, 0.3, 1) 260ms both; }
+    .hero .install   { animation: reveal-in 700ms cubic-bezier(0.16, 1, 0.3, 1) 380ms both; }
+    .hero .cta-row   { animation: reveal-in 700ms cubic-bezier(0.16, 1, 0.3, 1) 500ms both; }
+    .hero .preview   { animation: reveal-in 800ms cubic-bezier(0.16, 1, 0.3, 1) 640ms both; }
+
+    /* Section scroll-reveal — each non-hero section fades/slides up the
+       first time it enters the viewport. JS adds .revealed. */
+    main > section:not(.hero) {
+      opacity: 0;
+      transform: translateY(20px);
+      transition:
+        opacity 600ms cubic-bezier(0.16, 1, 0.3, 1),
+        transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    main > section:not(.hero).revealed {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* "Warm" cache dot — slow breathing pulse, suggests 'live/alive'.
+       Only on the warm state; others stay still. */
+    @keyframes dot-pulse {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: 0.5; }
+    }
+    .state-line.warm .dot {
+      animation: dot-pulse 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+
+    /* Copy-command ripple — expands from click point, fades out */
+    .cmd .ripple {
+      position: absolute;
+      pointer-events: none;
+      background: var(--accent);
+      opacity: 0.22;
+      border-radius: 50%;
+      transform: scale(0);
+      animation: ripple-expand 540ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+    @keyframes ripple-expand {
+      to { transform: scale(3); opacity: 0; }
+    }
+
+    /* Respect user preference — strip all motion */
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
       }
+      main > section:not(.hero) {
+        opacity: 1 !important;
+        transform: none !important;
+      }
+    }
+
+    /* ====== Mobile refinements ====== */
+    @media (max-width: 640px) {
+      /* Tighter hero padding + generous but not wasteful spacing */
+      section.hero { padding-top: clamp(2rem, 8vw, 3rem); padding-bottom: clamp(2rem, 6vw, 3rem); }
+      .hero h1 { max-width: 100%; }
+      .hero .lede { font-size: 1rem; }
+      /* Preview panel — tighter internal padding on small screens */
+      .preview-body { padding: 1rem 1.1rem 1.1rem; font-size: 12.5px; line-height: 2; }
+      .preview-head { padding: 0.5rem 1rem; font-size: 10px; }
+      /* Install buttons fill the column, always tappable */
+      .install { max-width: 100%; }
+      /* Section tag label less aggressive letter-spacing on small viewports */
+      .sec-tag { letter-spacing: 0.18em; }
+      /* Code blocks — tighter padding but preserve pre wrapping */
+      .box, .codeblock { padding: 1rem 1.1rem; font-size: 12px; }
+      .codeblock { max-width: 100%; }
+      /* CTA row spacing tighter */
+      .cta-row { gap: 1.25rem; margin-top: 1.4rem; }
+      /* Header meta wraps under brand smoothly (already flex-wrap); tighten gap */
+      header .meta { gap: 0.6rem; }
+    }
+
+    /* Very narrow phones (≤380px) — more aggressive tightening */
+    @media (max-width: 380px) {
+      .hero .lede { font-size: 0.96rem; }
+      .cmd { font-size: 12.5px; padding: 0.65rem 0.85rem; }
+      .cta-row { font-size: 11.5px; gap: 1rem; }
     }
   </style>
 </head>
 <body>
   <header>
     <div class="wrap">
-      <span class="brand"><span class="mark">§</span>claudecompress</span>
+      <span class="brand"><span class="mark">◉</span>claudecompress</span>
       <span class="meta">
         <span>v0.7.0</span>
         <span class="dot-sep">·</span>
@@ -394,130 +667,135 @@
     </div>
   </header>
 
-  <main class="wrap">
+  <main>
     <section class="hero">
-      <div class="hero-grid">
-        <div>
-          <div class="kicker">For Claude Code</div>
-          <h1>Three things Claude Code is <span class="italic accent">missing</span>.</h1>
-          <p class="lede">A <em>cache-TTL countdown</em> inside the status line, a <code>/compress</code> slash command for mid-session trimming, and an offline trimmer that makes cold <code>/resume</code> cheap again.</p>
+      <div class="wrap">
+        <pre class="cc-ascii" role="img" aria-label="Claude Code">
+ ██████╗██╗      █████╗ ██╗   ██╗██████╗ ███████╗    ██████╗ ██████╗ ██████╗ ███████╗
+██╔════╝██║     ██╔══██╗██║   ██║██╔══██╗██╔════╝   ██╔════╝██╔═══██╗██╔══██╗██╔════╝
+██║     ██║     ███████║██║   ██║██║  ██║█████╗     ██║     ██║   ██║██║  ██║█████╗
+██║     ██║     ██╔══██║██║   ██║██║  ██║██╔══╝     ██║     ██║   ██║██║  ██║██╔══╝
+╚██████╗███████╗██║  ██║╚██████╔╝██████╔╝███████╗   ╚██████╗╚██████╔╝██████╔╝███████╗
+ ╚═════╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝    ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝</pre>
 
-          <div class="install">
-            <div class="cmd" data-copy="bun add -g claudecompress">
-              <span class="prompt">$</span><span class="code">bun add -g claudecompress</span><span class="copy">copy</span>
+        <div class="hero-below">
+          <div>
+            <h1>is <span class="italic">missing</span> two things.</h1>
+
+            <p class="lede">A live <em>cache-TTL countdown</em> in your status line, and a trimmer that keeps cold <code>/resume</code> cheap.</p>
+
+            <div class="install">
+              <button type="button" class="cmd" data-copy="bun add -g claudecompress" aria-label="Copy: bun add -g claudecompress">
+                <span class="prompt" aria-hidden="true">$</span><span class="code">bun add -g claudecompress</span><span class="copy" aria-hidden="true">copy</span>
+              </button>
+              <button type="button" class="cmd" data-copy="claudecompress install" aria-label="Copy: claudecompress install">
+                <span class="prompt" aria-hidden="true">$</span><span class="code">claudecompress install</span><span class="copy" aria-hidden="true">copy</span>
+              </button>
             </div>
-            <div class="cmd" data-copy="claudecompress install">
-              <span class="prompt">$</span><span class="code">claudecompress install</span><span class="copy">copy</span>
+
+            <div class="cta-row">
+              <a href="#savings">see savings ↓</a>
+              <a href="https://github.com/bihanikeshav/ClaudeCompress">github →</a>
             </div>
           </div>
 
-          <div class="cta-row">
-            <a href="#savings">see savings ↓</a>
-            <a href="https://github.com/bihanikeshav/ClaudeCompress">github →</a>
-          </div>
+          <aside class="preview" aria-label="Cache status line preview">
+            <div class="preview-head">Status line · four states</div>
+            <div class="preview-body">
+              <div class="state-line active">
+                <span class="dot">◉</span><span class="label">cache active</span><span class="sep">·</span>agent working<span class="sep">·</span><span class="faint">Opus 4.7</span>
+              </div>
+              <div class="state-line warm">
+                <span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span><span id="hero-countdown">4:32</span> left<span class="sep">·</span><span class="faint">Opus 4.7</span>
+              </div>
+              <div class="state-line low">
+                <span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span><span id="hero-countdown-low">0:58</span> left<span class="sep">·</span><span class="faint">Opus 4.7</span>
+              </div>
+              <div class="state-line cold">
+                <span class="dot">◉</span><span class="label">cache cold</span><span class="sep">·</span>12m past<span class="sep">·</span>use <span class="chip">/compress</span>
+              </div>
+            </div>
+          </aside>
         </div>
-
-        <aside class="preview" aria-label="Cache status line preview">
-          <div class="preview-head">
-            <span>Status line · four states</span>
-            <span class="fig">Fig. 1</span>
-          </div>
-          <div class="preview-body">
-            <div class="state-line warm">
-              <span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span>4:32 left<span class="sep">·</span><span class="faint">Opus 4.7</span>
-            </div>
-            <div class="state-line low">
-              <span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span>0:58 left<span class="sep">·</span><span class="faint">Opus 4.7</span>
-            </div>
-            <div class="state-line cold">
-              <span class="dot">○</span><span class="label">cache cold</span><span class="sep">·</span>12m past<span class="sep">·</span>use <span class="chip">/compress</span>
-            </div>
-            <div class="state-line active">
-              <span class="dot">◉</span><span class="label">cache active</span><span class="sep">·</span>agent working<span class="sep">·</span><span class="faint">Opus 4.7</span>
-            </div>
-          </div>
-        </aside>
       </div>
     </section>
 
     <section>
-      <div class="sec-tag"><span class="num">§ 01</span><span>/compress</span></div>
-      <div class="split">
-        <div>
-          <h2>Trim <span class="italic">without</span> leaving.</h2>
-          <p class="intro">Type <code>/compress</code>. A trimmed sibling JSONL is written with a new UUID, savings printed, resume command handed to you. Six modes, surgical to nuclear. Original untouched.</p>
-          <p class="aside-note">Or run under <code>ccw</code> — it auto-resumes the trimmed session on <code>Ctrl+C</code>.</p>
-        </div>
-        <div class="box">
-<span class="dim">┌─ claudecompress ────────────────────────────────┐</span>
+      <div class="wrap">
+        <div class="sec-tag"><span>Trim</span></div>
+        <div class="split">
+          <div>
+            <h2>Trim any session <span class="italic">without</span> losing the thread.</h2>
+            <p class="intro">Shrinks your session by clearing out old tool output and collapsing past turns, while keeping your recent conversation intact. Trim customizable based on your needs, from <code>Redact</code> (safe default) to <code>Ultra</code>. Original JSONL is never touched; a trimmed sibling lands beside it with a fresh UUID.</p>
+            <p class="aside-note">Use our <code>ccw</code> wrapper to make resume seamless after <code>/compress</code>, or run <code>bunx claudecompress</code> offline and restart your session manually.</p>
+          </div>
+          <div>
+            <div class="demo-label">Inside a session</div>
+            <div class="box"><span class="dim">┌─ claudecompress ────────────────────────────────┐</span>
   mode:   focus (last 5) <span class="dim">· dropped thinking</span>
   tokens: 761k <span class="accent">→</span> 217k       <span class="savings">(saved ≈ 544k)</span>
   cold $ $11.41 <span class="accent">→</span> $3.25    <span class="savings">(saved ≈ $8.16)</span>
   trimmed: 17420d99-7152-4359-bfdd…
 <span class="dim">└────────────────────────────────────────────────┘</span>
   <span class="dim">Ctrl+C, then:</span>  claude --resume 17420d99…</div>
-      </div>
-    </section>
 
-    <section>
-      <div class="sec-tag"><span class="num">§ 02</span><span>Offline trimmer</span></div>
-      <div class="split">
-        <div>
-          <h2>One command, <span class="italic">any</span> session.</h2>
-          <p class="intro">For sessions you didn't trim live. Picks up your project, flags staleness, shows per-session cost, writes a new JSONL beside the old.</p>
-        </div>
-        <div class="codeblock"><span class="prompt">$</span> bunx claudecompress
+            <div class="demo-label" style="margin-top: 1.5rem">Any saved session</div>
+            <div class="codeblock"><span class="prompt">$</span> bunx claudecompress
   <span class="comment"># lists your sessions, staleness, cost</span>
   <span class="comment"># pick a mode, confirm</span>
   <span class="comment"># new trimmed JSONL lands beside the old</span></div>
+          </div>
+        </div>
       </div>
     </section>
 
     <section id="savings">
-      <div class="sec-tag"><span class="num">§ 03</span><span>Savings</span></div>
-      <h2>A 761k Opus session, six modes.</h2>
-      <p class="intro">Real numbers. 153 user turns in the session. <code>Focus 5</code> is the recommended default — keeps the last 5 back-and-forths verbatim plus a dialog-only trail of everything older. Cuts cold-resume cost by ~70% while leaving enough recent context to keep working. <code>Ultra</code> is the nuke.</p>
-      <table>
-        <thead>
-          <tr>
-            <th>Mode</th>
-            <th>Tokens</th>
-            <th>Cold cost</th>
-            <th>Saved</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr class="baseline"><td class="mode">None (baseline)</td><td>761k</td><td>$11.41</td><td>—</td></tr>
-          <tr><td class="mode">Redact</td><td>503k</td><td>$7.54</td><td class="saved">$3.87</td></tr>
-          <tr><td class="mode">Recency 15</td><td>574k</td><td>$8.61</td><td class="saved">$2.80</td></tr>
-          <tr><td class="mode">Focus 15</td><td>327k</td><td>$4.91</td><td class="saved">$6.50</td></tr>
-          <tr class="pick"><td class="mode">Focus 5</td><td>217k</td><td>$3.25</td><td class="saved">$8.16</td></tr>
-          <tr><td class="mode">Ultra</td><td>125k</td><td>$1.88</td><td class="saved">$9.53</td></tr>
-        </tbody>
-      </table>
+      <div class="wrap">
+        <div class="sec-tag"><span class="num">2.</span><span>Savings</span></div>
+        <h2>A 761k Opus session.</h2>
+        <p class="intro">Real numbers. 153 user turns in the session. <code>Focus 5</code> is the recommended default: keeps the last 5 back-and-forths verbatim plus a dialog-only trail of everything older. Cuts cold-resume cost by ~70%. <code>Ultra</code> is the nuke.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Mode</th>
+                <th>Tokens</th>
+                <th>Cold cost</th>
+                <th>Saved</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="baseline"><td class="mode">None (baseline)</td><td>761k</td><td>$11.41</td><td>·</td></tr>
+              <tr><td class="mode">Redact</td><td>503k</td><td class="cost" data-start="11.41" data-target="7.54">$7.54</td><td class="saved">$3.87</td></tr>
+              <tr><td class="mode">Recency 15</td><td>574k</td><td class="cost" data-start="11.41" data-target="8.61">$8.61</td><td class="saved">$2.80</td></tr>
+              <tr><td class="mode">Focus 15</td><td>327k</td><td class="cost" data-start="11.41" data-target="4.91">$4.91</td><td class="saved">$6.50</td></tr>
+              <tr class="pick"><td class="mode">Focus 5</td><td>217k</td><td class="cost" data-start="11.41" data-target="3.25">$3.25</td><td class="saved">$8.16</td></tr>
+              <tr><td class="mode">Ultra</td><td>125k</td><td class="cost" data-start="11.41" data-target="1.88">$1.88</td><td class="saved">$9.53</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
 
     <section id="install">
-      <div class="sec-tag"><span class="num">§ 04</span><span>Install</span></div>
-      <div class="split">
-        <div>
-          <h2>Install. <span class="italic">Restart.</span> Done.</h2>
-          <p class="intro">Install global — the status line ticks every second and needs fast startup. Bun preferred, node fine. <code>settings.json</code> is backed up; nothing overwritten without a prompt.</p>
+      <div class="wrap">
+        <div class="sec-tag"><span class="num">3.</span><span>Install</span></div>
+        <div class="split">
+          <div>
+            <h2>Install. <span class="italic">Restart.</span> Done.</h2>
+            <p class="intro">Install global. The status line ticks every second and needs fast startup. Bun preferred, node fine. <code>settings.json</code> is backed up; nothing overwritten without a prompt.</p>
+          </div>
+          <div class="codeblock"><span class="prompt">$</span> bun add -g claudecompress  <span class="comment"># or: npm i -g claudecompress</span>
+<span class="prompt">$</span> claudecompress install       <span class="comment"># pick hook + statusLine</span>
+<span class="comment"># quit and relaunch Claude Code</span></div>
         </div>
-        <div class="codeblock"><span class="prompt">$</span> bun add -g claudecompress
-<span class="comment"># or: npm i -g claudecompress</span>
-
-<span class="prompt">$</span> claudecompress install
-<span class="comment"># pick: hook, status line, or both</span>
-
-<span class="comment"># quit and relaunch Claude Code.</span></div>
       </div>
     </section>
   </main>
 
   <footer>
     <div class="wrap">
-      <span>MIT license · no telemetry</span>
+      <span>MIT license</span>
       <span>
         <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
         <span class="dot-sep">·</span>
@@ -529,8 +807,24 @@
   </footer>
 
   <script>
+    const REDUCE_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    // --- copy-to-clipboard + ripple --------------------------------------
     for (const el of document.querySelectorAll(".cmd")) {
-      el.addEventListener("click", async () => {
+      el.addEventListener("click", async (ev) => {
+        // Ripple emanating from the click point (skip under reduced motion)
+        if (!REDUCE_MOTION) {
+          const rect = el.getBoundingClientRect();
+          const r = document.createElement("span");
+          r.className = "ripple";
+          const size = Math.max(rect.width, rect.height);
+          r.style.width = r.style.height = size + "px";
+          r.style.left = (ev.clientX - rect.left - size / 2) + "px";
+          r.style.top = (ev.clientY - rect.top - size / 2) + "px";
+          el.appendChild(r);
+          setTimeout(() => r.remove(), 580);
+        }
+
         const text = el.dataset.copy || "";
         const label = el.querySelector(".copy");
         const original = label.textContent;
@@ -539,11 +833,11 @@
           el.classList.add("copied");
           label.textContent = "copied";
         } catch {
-          const r = document.createRange();
-          r.selectNodeContents(el.querySelector(".code"));
+          const r2 = document.createRange();
+          r2.selectNodeContents(el.querySelector(".code"));
           const s = window.getSelection();
           s.removeAllRanges();
-          s.addRange(r);
+          s.addRange(r2);
           label.textContent = "select & ⌘C";
         }
         setTimeout(() => {
@@ -552,6 +846,86 @@
         }, 1400);
       });
     }
+
+    // --- section scroll-reveal -------------------------------------------
+    if (!REDUCE_MOTION && "IntersectionObserver" in window) {
+      const revealIO = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("revealed");
+            revealIO.unobserve(entry.target);
+          }
+        }
+      }, { threshold: 0.12, rootMargin: "0px 0px -60px 0px" });
+      for (const s of document.querySelectorAll("main > section:not(.hero)")) {
+        revealIO.observe(s);
+      }
+    } else {
+      // No observer / reduced motion: show everything immediately
+      for (const s of document.querySelectorAll("main > section:not(.hero)")) {
+        s.classList.add("revealed");
+      }
+    }
+
+    // --- hero countdown tick ---------------------------------------------
+    // Both the warm (4:32) and low (0:58) states tick down live. Each
+    // loops back to its own starting value on reaching 0:00 so the demo
+    // keeps "living" indefinitely.
+    function installCountdown(id) {
+      const el = document.getElementById(id);
+      if (!el || REDUCE_MOTION) return;
+      const startText = el.textContent;
+      let [m, s] = startText.split(":").map(Number);
+      setInterval(() => {
+        if (s === 0) {
+          if (m === 0) {
+            const [m0, s0] = startText.split(":").map(Number);
+            m = m0; s = s0;
+          } else { m -= 1; s = 59; }
+        } else { s -= 1; }
+        el.textContent = m + ":" + String(s).padStart(2, "0");
+      }, 1000);
+    }
+    installCountdown("hero-countdown");
+    installCountdown("hero-countdown-low");
+
+    // --- savings cost count-down (on scroll into view) -------------------
+    (function setupCostAnimator() {
+      const cells = document.querySelectorAll("td.cost[data-target]");
+      if (!cells.length) return;
+
+      const animate = (cell) => {
+        const start = parseFloat(cell.dataset.start);
+        const target = parseFloat(cell.dataset.target);
+        if (!Number.isFinite(start) || !Number.isFinite(target)) return;
+        if (REDUCE_MOTION) { cell.textContent = "$" + target.toFixed(2); return; }
+        const t0 = performance.now();
+        const dur = 1100;
+        // ease-out-quart
+        const ease = (t) => 1 - Math.pow(1 - t, 4);
+        const frame = (now) => {
+          const t = Math.min(1, (now - t0) / dur);
+          const v = start + (target - start) * ease(t);
+          cell.textContent = "$" + v.toFixed(2);
+          if (t < 1) requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+      };
+
+      if ("IntersectionObserver" in window && !REDUCE_MOTION) {
+        const io = new IntersectionObserver((entries) => {
+          for (const e of entries) {
+            if (e.isIntersecting) {
+              animate(e.target);
+              io.unobserve(e.target);
+            }
+          }
+        }, { threshold: 0.35 });
+        for (const c of cells) io.observe(c);
+      } else {
+        for (const c of cells) animate(c);
+      }
+    })();
   </script>
 </body>
 </html>
