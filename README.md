@@ -46,8 +46,8 @@ Type it in any Claude Code session. The hook trims the current session's JSONL a
 ```
 /compress               # Redact (default) + drop thinking
 /compress ultra         # dialog-only
-/compress focus 20      # dialog trail + last 20 turns verbatim
-/compress recency 10    # last 10 turns verbatim, redact older
+/compress focus 15      # dialog trail + last 15 user turns verbatim
+/compress recency 10    # last 10 user turns verbatim, redact older
 /compress smart         # per-tool rules
 /compress truncate 500  # keep first 500 chars per tool_result
 ```
@@ -111,25 +111,26 @@ Every trim is logged to `~/.claude/claudecompress/history.jsonl`. The interactiv
 | Mode | Weight | Behavior |
 |---|---|---|
 | **Redact** (default) | medium | drop all tool_result bodies, keep full structure |
-| **Recency N** | medium | keep last N records verbatim, redact older |
-| **Focus N** | medium–heavy | dialog-only trail + last N records verbatim |
+| **Recency N** | medium | keep last N user turns verbatim (with their tool chains), redact older |
+| **Focus N** | medium–heavy | dialog-only trail for older turns + last N user turns verbatim |
 | **Smart** | light | per-tool rules: Read heads/tails, Bash errors, full Edit/TodoWrite, redact WebFetch and heavy MCP responses |
 | **Ultra** | heavy | user + assistant text only; tools/thinking all dropped |
 | **Truncate N** | manual | keep first N chars of every tool_result |
 
-**N counts JSONL records**, not conversational turns. Each tool call, tool result, user message, and assistant reply is one record. In a tool-heavy session, a single conversational exchange can span 15–30 records — so `Focus 500` ≈ the last 20–30 exchanges kept verbatim, not 500 of them.
+**N counts your user messages**, not JSONL records. Each time you send a message, everything the agent does in response (tool calls, tool results, thinking, reply) is one "user turn". `Focus 5` keeps the last 5 back-and-forths verbatim; anything before is compressed to a dialog-only trail.
 
 **Drop-thinking toggle** (any non-Ultra mode): cuts 200k+ tokens. Claude doesn't re-read prior thinking on resume — free.
 
-Real savings on a 760k-token Opus session:
+Real savings on a 761k-token Opus session (153 user turns):
 
 | Mode | Tokens | Cold cost | Saved |
 |---|---|---|---|
-| None (baseline) | 760k | $11.41 | — |
-| Redact | 504k | $7.56 | $3.85 |
-| Recency 15 | 501k | $7.52 | $3.89 |
-| Focus 500 | 217k | $3.25 | $8.16 |
-| Focus 100 | 136k | $2.04 | $9.37 |
+| None (baseline) | 761k | $11.41 | — |
+| Redact | 503k | $7.54 | $3.87 |
+| Recency 15 | 574k | $8.61 | $2.80 |
+| Focus 25 | 375k | $5.63 | $5.78 |
+| Focus 15 | 327k | $4.91 | $6.50 |
+| Focus 5 | 217k | $3.25 | $8.16 |
 | Ultra | 125k | $1.88 | $9.53 |
 
 Cost estimates use each model's actual input rate (Opus 4.7/4.6, Sonnet 4.6, Haiku 4.5). Token count is a char-based approximation — within ~10% of Anthropic's tokenizer.

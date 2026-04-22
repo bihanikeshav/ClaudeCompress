@@ -149,34 +149,96 @@ async function pickSession(projectDir: string, allowSwitch = true): Promise<stri
   return picked as string;
 }
 
-async function pickMode(): Promise<TrimOptions | null> {
+/**
+ * Run each of the common modes to a temp file and measure the resulting
+ * cold-resume cost. Returns a map keyed by mode id → USD. Focus/Recency
+ * use the given defaultN (displayed as "at N=15" in the picker).
+ *
+ * Sequential to avoid hammering the disk; 6 trims on a 35MB file runs in
+ * ~5-8s. Caller should wrap in a spinner.
+ */
+async function estimateModeSavings(
+  sessionPath: string,
+  model: ModelInfo,
+  defaultN = 15,
+): Promise<Record<string, { after: number; saved: number }>> {
+  const { unlinkSync } = await import("node:fs");
+  const baseTokens = estimateSessionTokens(sessionPath, model);
+  const baseCost = estimateColdResumeCost(baseTokens, model);
+
+  const jobs: { key: string; opts: TrimOptions }[] = [
+    { key: "redact", opts: { mode: "redact", dropThinking: true } },
+    { key: "recency", opts: { mode: "recency", keepLastN: defaultN, dropThinking: true } },
+    { key: "focus", opts: { mode: "focus", keepLastN: defaultN, dropThinking: true } },
+    { key: "smart", opts: { mode: "smart", dropThinking: true } },
+    { key: "ultra", opts: { mode: "ultra" } },
+    { key: "truncate", opts: { mode: "truncate", keepChars: 400, dropThinking: true } },
+  ];
+
+  const out: Record<string, { after: number; saved: number }> = {};
+  for (const { key, opts } of jobs) {
+    try {
+      const outPath = await trimSession(sessionPath, opts);
+      const afterTokens = estimateSessionTokens(outPath, model);
+      const afterCost = estimateColdResumeCost(afterTokens, model);
+      out[key] = { after: afterCost, saved: Math.max(0, baseCost - afterCost) };
+      try { unlinkSync(outPath); } catch {}
+    } catch {
+      // skip mode on error
+    }
+  }
+  return out;
+}
+
+async function pickMode(
+  sessionPath?: string,
+  model?: ModelInfo,
+  defaultN = 15,
+): Promise<TrimOptions | null> {
+  // Pre-compute savings per mode so the picker shows real numbers, not
+  // vague descriptors. Skipped if we weren't given the session/model
+  // context (e.g. subcommand usage).
+  let est: Record<string, { after: number; saved: number }> = {};
+  if (sessionPath && model) {
+    const spin = p.spinner();
+    spin.start(`Estimating savings for each mode (N=${defaultN} where applicable)`);
+    est = await estimateModeSavings(sessionPath, model, defaultN);
+    spin.stop("Mode estimates ready.");
+  }
+
+  const savingsTag = (key: string): string => {
+    const r = est[key];
+    if (!r) return "";
+    return `  ${pc.green("saves ≈ " + formatUSD(r.saved))}`;
+  };
+
   const mode = await p.select({
     message: "How aggressive?",
     initialValue: "redact",
     options: [
       {
         value: "redact",
-        label: `${pc.yellow("Redact")}   ${pc.dim("medium — drop all tool_result bodies, keep structure  [default]")}`,
+        label: `${pc.yellow("Redact")}  ${pc.dim("drop tool_result bodies, keep structure")}${savingsTag("redact")}`,
       },
       {
         value: "recency",
-        label: `${pc.blue("Recency")}  ${pc.dim("keep last N turns verbatim, redact older")}`,
+        label: `${pc.blue("Recency")}  ${pc.dim(`keep last N user turns verbatim, redact older`)}${savingsTag("recency")}`,
       },
       {
         value: "focus",
-        label: `${pc.cyan("Focus")}    ${pc.dim("dialog trail + last N turns verbatim — between Ultra & Recency")}`,
+        label: `${pc.cyan("Focus")}  ${pc.dim(`dialog trail + last N user turns verbatim`)}${savingsTag("focus")}`,
       },
       {
         value: "smart",
-        label: `${pc.magenta("Smart")}    ${pc.dim("light — per-tool rules, preserves Read heads, Bash errors, TodoWrite")}`,
+        label: `${pc.magenta("Smart")}  ${pc.dim("per-tool rules — Read heads, Bash errors, full TodoWrite")}${savingsTag("smart")}`,
       },
       {
         value: "ultra",
-        label: `${pc.green("Ultra")}    ${pc.dim("heavy — dialog only; tool calls, results, thinking all dropped")}`,
+        label: `${pc.green("Ultra")}  ${pc.dim("dialog only; tool calls/results/thinking dropped")}${savingsTag("ultra")}`,
       },
       {
         value: "truncate",
-        label: `${pc.cyan("Truncate")} ${pc.dim("manual — keep first N chars of every tool_result")}`,
+        label: `${pc.cyan("Truncate")}  ${pc.dim("keep first N chars of every tool_result")}${savingsTag("truncate")}`,
       },
     ],
   });
@@ -198,9 +260,9 @@ async function pickMode(): Promise<TrimOptions | null> {
     baseOpts = { mode: "truncate", keepChars: Number(raw) };
   } else if (mode === "recency" || mode === "focus") {
     const raw = await p.text({
-      message: "How many recent turns to keep verbatim?",
-      placeholder: "15",
-      initialValue: "15",
+      message: "How many recent user turns (your messages) to keep verbatim?",
+      placeholder: String(defaultN),
+      initialValue: String(defaultN),
       validate: (v) => {
         const n = Number(v);
         if (!Number.isFinite(n) || n <= 0) return "Enter a positive number";
@@ -349,7 +411,7 @@ async function main() {
   const before = analyze(session);
   printReport("Before", before);
 
-  const opts = await pickMode();
+  const opts = await pickMode(session, model);
   if (!opts) return p.cancel("Aborted.");
 
   const confirm = await p.confirm({

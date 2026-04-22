@@ -314,18 +314,19 @@
 
     <section id="savings">
       <div class="sec-tag">§ 03 — savings</div>
-      <h2>A 760k Opus session, six modes.</h2>
-      <p class="intro">Real numbers. Focus 500 keeps the last 500 JSONL records verbatim (each tool call and result counts as one) and a dialog-only trail for everything older — best if you plan to keep working. Ultra is the nuke.</p>
+      <h2>A 761k Opus session, six modes.</h2>
+      <p class="intro">Real numbers. 153 user turns in the session. <code>Focus 15</code> keeps the last 15 back-and-forths verbatim + a dialog trail for everything older — sweet spot if you plan to keep working. <code>Ultra</code> is the nuke.</p>
       <table>
         <thead>
           <tr><th>Mode</th><th>Tokens</th><th>Cold cost</th><th>Saved</th></tr>
         </thead>
         <tbody>
-          <tr class="baseline"><td class="mode">None (baseline)</td><td>760k</td><td>$11.41</td><td>—</td></tr>
-          <tr><td class="mode">Redact</td><td>504k</td><td>$7.56</td><td class="saved">$3.85</td></tr>
-          <tr><td class="mode">Recency 15</td><td>501k</td><td>$7.52</td><td class="saved">$3.89</td></tr>
-          <tr class="pick"><td class="mode">Focus 500</td><td>217k</td><td>$3.25</td><td class="saved">$8.16</td></tr>
-          <tr><td class="mode">Focus 100</td><td>136k</td><td>$2.04</td><td class="saved">$9.37</td></tr>
+          <tr class="baseline"><td class="mode">None (baseline)</td><td>761k</td><td>$11.41</td><td>—</td></tr>
+          <tr><td class="mode">Redact</td><td>503k</td><td>$7.54</td><td class="saved">$3.87</td></tr>
+          <tr><td class="mode">Recency 15</td><td>574k</td><td>$8.61</td><td class="saved">$2.80</td></tr>
+          <tr><td class="mode">Focus 25</td><td>375k</td><td>$5.63</td><td class="saved">$5.78</td></tr>
+          <tr class="pick"><td class="mode">Focus 15</td><td>327k</td><td>$4.91</td><td class="saved">$6.50</td></tr>
+          <tr><td class="mode">Focus 5</td><td>217k</td><td>$3.25</td><td class="saved">$8.16</td></tr>
           <tr><td class="mode">Ultra</td><td>125k</td><td>$1.88</td><td class="saved">$9.53</td></tr>
         </tbody>
       </table>

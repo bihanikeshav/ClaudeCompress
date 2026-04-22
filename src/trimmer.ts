@@ -190,22 +190,54 @@ function markFirstUser(rec: any): any {
 }
 
 /**
- * For recency mode: count user+assistant messages, so we can mark which
- * index crosses the "last N" boundary on the second pass.
+ * A "conversational exchange" is anchored by a user text message. Each time
+ * the user says something, everything that follows (tool calls, tool
+ * results, assistant replies, thinking) belongs to that exchange until the
+ * next user text turn. Tool_result records (type: "user" with array
+ * content) and client-side command records are NOT exchange starts.
  */
-function countConversationTurns(path: string): number {
-  let n = 0;
+function isUserTextTurn(rec: any): boolean {
+  if (rec?.type !== "user") return false;
+  const content = rec?.message?.content;
+  if (typeof content !== "string") return false;
+  const trimmed = content.trimStart();
+  if (
+    trimmed.startsWith("<local-command-") ||
+    trimmed.startsWith("<command-name>") ||
+    trimmed.startsWith("<command-message>") ||
+    trimmed.startsWith("<command-args>")
+  ) {
+    return false;
+  }
+  // Bare typed slash commands aren't conversational exchanges either.
+  if (/^\/[a-zA-Z][\w:-]*(\s|$)/.test(trimmed)) return false;
+  return true;
+}
+
+/**
+ * Scan the JSONL once and return the record index of the Nth-from-last user
+ * text turn. The trim loop treats records at or after this index as "recent"
+ * (kept verbatim); records before it are trimmed per the mode.
+ *
+ * Returns 0 if there are fewer than N user turns total (keep everything).
+ */
+function findRecencyCutoffRecordIndex(path: string, keepLastN: number): number {
   const data = readFileSync(path, "utf8");
-  for (const line of data.split("\n")) {
+  const lines = data.split("\n");
+  const userTurnAtRecord: number[] = [];
+  let recordIdx = -1;
+  for (const line of lines) {
     if (!line) continue;
+    recordIdx += 1;
     try {
       const r = JSON.parse(line);
-      if (r.type === "user" || r.type === "assistant") n += 1;
+      if (isUserTextTurn(r)) userTurnAtRecord.push(recordIdx);
     } catch {
       // skip
     }
   }
-  return n;
+  if (userTurnAtRecord.length <= keepLastN) return 0;
+  return userTurnAtRecord[userTurnAtRecord.length - keepLastN];
 }
 
 function dropThinkingBlocks(rec: any): any {
@@ -239,12 +271,11 @@ export async function trimSession(
   let lastKeptUuid: string | null = null;
   const toolUseNames = new Map<string, string>();
 
-  const needsTurnCount = opts.mode === "recency" || opts.mode === "focus";
-  const totalTurns = needsTurnCount ? countConversationTurns(inputPath) : 0;
-  const recencyCutoff = needsTurnCount
-    ? Math.max(0, totalTurns - (opts.keepLastN ?? 15))
+  const needsCutoff = opts.mode === "recency" || opts.mode === "focus";
+  const cutoffRecordIdx = needsCutoff
+    ? findRecencyCutoffRecordIndex(inputPath, opts.keepLastN ?? 15)
     : 0;
-  let turnIndex = 0;
+  let recordIdx = -1;
 
   for await (const line of rl) {
     if (!line) continue;
@@ -255,6 +286,8 @@ export async function trimSession(
       if (opts.mode !== "ultra") outStream.write(line + "\n");
       continue;
     }
+    recordIdx += 1;
+    const inRecent = needsCutoff && recordIdx >= cutoffRecordIdx;
     let newRec: any | null;
     if (opts.mode === "ultra") {
       newRec = ultraTrimRecord(rec, newSid);
@@ -265,26 +298,21 @@ export async function trimSession(
       newRec = trimRecordSmart(rec, newSid, toolUseNames);
       if (!newRec) continue;
     } else if (opts.mode === "recency") {
-      const isTurn = rec.type === "user" || rec.type === "assistant";
-      const isRecent = isTurn && turnIndex >= recencyCutoff;
-      if (isTurn) turnIndex += 1;
-      newRec = isRecent
+      newRec = inRecent
         ? { ...rec, ...(rec.sessionId ? { sessionId: newSid } : {}) }
         : trimRecordRedact(rec, newSid);
       if (!newRec) continue;
     } else if (opts.mode === "focus") {
       const isTurn = rec.type === "user" || rec.type === "assistant";
-      const currentIdx = isTurn ? turnIndex : -1;
-      if (isTurn) turnIndex += 1;
-      const inRecent = currentIdx >= recencyCutoff;
 
       if (!isTurn) {
-        // Drop all non-message records in the old phase (attachments, snapshots,
-        // queue ops); keep them verbatim once we're past the cutoff.
-        if (turnIndex < recencyCutoff) continue;
+        // Meta records (attachments, snapshots, queue ops, etc.) — drop them
+        // in the trimmed phase, keep verbatim once we're past the cutoff.
+        if (!inRecent) continue;
         newRec = { ...rec };
         if ("sessionId" in newRec) newRec.sessionId = newSid;
       } else if (!inRecent) {
+        // Old phase: dialog-only trail.
         newRec = ultraTrimRecord(rec, newSid);
         if (!newRec) continue;
         newRec.parentUuid = lastKeptUuid;
