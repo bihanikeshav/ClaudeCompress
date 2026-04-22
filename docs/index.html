@@ -4,8 +4,9 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>claudecompress — cache timer &amp; /compress for Claude Code</title>
-  <meta name="description" content="A live cache-TTL status line, a /compress slash command, and a retrospective trimmer — all for Claude Code." />
-  <meta name="color-scheme" content="dark" />
+  <meta name="description" content="A live cache-TTL status line, a /compress slash command, and an offline trimmer for Claude Code." />
+  <meta name="color-scheme" content="light" />
+  <meta name="theme-color" content="#f2ecdf" />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="claudecompress" />
   <meta property="og:description" content="Cache timer, /compress, and a trimmer for Claude Code." />
@@ -13,214 +14,370 @@
   <meta name="twitter:card" content="summary" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,0..100;1,9..144,300..900,0..100&family=Instrument+Sans:wght@400..700&family=JetBrains+Mono:wght@400..600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,0..100;1,9..144,300..900,0..100&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #0b0a09;
-      --bg-tint: #14120f;
-      --bg-raised: #181510;
-      --fg: #ebe6dc;
-      --fg-dim: #8d887c;
-      --fg-dimmer: #4f4a42;
-      --accent: #6fa3d1;
-      --accent-soft: #4a7ba0;
-      --green: #8fa76c;
-      --yellow: #d9a657;
-      --red: #c5695e;
-      --cyan: #7fb8b5;
-      --rule: #221e17;
+      /* Paper & ink */
+      --paper:      #f2ecdf;
+      --paper-tint: #ecdfc5;
+      --paper-rise: #e4d9bd;
+      --ink:        #1a1512;
+      --ink-soft:   #3a3229;
+      --ink-dim:    #6f6558;
+      --ink-fade:   #a39684;
+      --rule:       #d6c7a8;
+      --rule-strong:#b9a880;
+
+      /* Single accent: Prussian blue */
+      --accent:     #1f3d5a;
+      --accent-dim: #4a6684;
+
+      /* State palette — muted earth tones readable on cream */
+      --state-ok:     #4f6b2d;  /* olive */
+      --state-warn:   #a67520;  /* mustard / ochre */
+      --state-err:    #8f3f2e;  /* terracotta */
+      --state-active: #2d6876;  /* slate teal */
     }
+
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
     body {
       margin: 0;
-      background: var(--bg);
-      color: var(--fg);
-      font-family: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
       font-size: 17px;
-      line-height: 1.55;
+      line-height: 1.6;
       -webkit-font-smoothing: antialiased;
       font-feature-settings: "kern", "liga", "ss01";
       text-rendering: optimizeLegibility;
     }
-    ::selection { background: var(--accent); color: var(--bg); }
+    ::selection { background: var(--accent); color: var(--paper); }
 
-    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 clamp(1.25rem, 3.5vw, 3rem); }
+    /* subtle parchment tone gradient — barely visible, adds warmth */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(
+        ellipse at 50% 0%,
+        rgba(242, 231, 201, 0.5) 0%,
+        rgba(242, 231, 201, 0) 60%
+      );
+      z-index: 0;
+    }
+    body > * { position: relative; z-index: 1; }
 
-    h1, h2 { font-family: "Fraunces", "Times New Roman", serif; font-weight: 430; letter-spacing: -0.028em; line-height: 1; margin: 0; font-variation-settings: "opsz" 144, "SOFT" 30; }
-    h1 { font-size: clamp(2.75rem, 7.5vw, 5.5rem); }
-    h2 { font-size: clamp(1.85rem, 3.8vw, 2.6rem); font-weight: 480; line-height: 1.08; }
-    .italic { font-family: "Fraunces", serif; font-style: italic; font-weight: 420; }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 clamp(1.5rem, 4vw, 3rem); }
+
+    /* Typography */
+    h1, h2 {
+      font-family: "Fraunces", "Times New Roman", serif;
+      font-weight: 420;
+      letter-spacing: -0.018em;
+      line-height: 1.04;
+      margin: 0;
+      color: var(--ink);
+      font-variation-settings: "opsz" 144, "SOFT" 30;
+    }
+    h1 { font-size: clamp(2.5rem, 6.8vw, 5rem); font-weight: 380; letter-spacing: -0.024em; }
+    h2 { font-size: clamp(1.65rem, 3.6vw, 2.4rem); font-weight: 440; }
+    .italic { font-family: "Fraunces", serif; font-style: italic; font-weight: 380; }
     .accent { color: var(--accent); }
-    code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-feature-settings: "calt", "liga"; }
-    p code { background: var(--bg-tint); border: 1px solid var(--rule); padding: 0.05em 0.38em; border-radius: 3px; font-size: 0.86em; }
+
+    code, pre, .mono {
+      font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+      font-feature-settings: "calt", "liga";
+    }
+    p code {
+      background: var(--paper-rise);
+      border: 1px solid var(--rule);
+      padding: 0.03em 0.36em;
+      border-radius: 2px;
+      font-size: 0.86em;
+      color: var(--ink);
+    }
     pre { margin: 0; white-space: pre; }
 
-    header { border-bottom: 1px solid var(--rule); padding: 1.1rem 0; font-family: "JetBrains Mono", monospace; font-size: 12.5px; color: var(--fg-dim); }
-    header .wrap { display: flex; justify-content: space-between; align-items: center; }
-    header .brand { color: var(--fg); font-weight: 500; letter-spacing: -0.01em; }
-    header .brand .accent { color: var(--accent); }
-    header .meta { display: flex; gap: 0.9rem; align-items: center; }
-    header a { color: var(--fg-dim); text-decoration: none; transition: color 150ms ease; }
+    /* Header */
+    header {
+      border-bottom: 1px solid var(--rule);
+      padding: 1rem 0;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12.5px;
+      color: var(--ink-dim);
+    }
+    header .wrap { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    header .brand { color: var(--ink); font-weight: 500; letter-spacing: -0.005em; }
+    header .brand .mark { color: var(--accent); font-weight: 600; margin-right: 0.45em; }
+    header .meta { display: flex; gap: 0.85rem; align-items: center; }
+    header a { color: var(--ink-dim); text-decoration: none; transition: color 180ms ease; }
     header a:hover { color: var(--accent); }
-    .dot-sep { color: var(--fg-dimmer); }
+    .dot-sep { color: var(--ink-fade); }
 
-    section { padding: clamp(3rem, 7vw, 5rem) 0; border-top: 1px solid var(--rule); }
-    section.hero { border-top: none; padding-top: clamp(3rem, 8vw, 5.5rem); padding-bottom: clamp(3rem, 8vw, 5.5rem); }
+    /* Sections */
+    section {
+      padding: clamp(3.25rem, 8vw, 5.5rem) 0;
+      border-top: 1px solid var(--rule);
+    }
+    section.hero {
+      border-top: none;
+      padding-top: clamp(3.5rem, 9vw, 6rem);
+      padding-bottom: clamp(3.5rem, 9vw, 6rem);
+    }
 
-    .kicker { font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--fg-dimmer); letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 1.25rem; }
+    .kicker {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+      color: var(--accent);
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      margin-bottom: 1.4rem;
+      font-weight: 500;
+    }
 
-    /* hero grid */
+    /* Hero grid */
     .hero-grid {
       display: grid;
       grid-template-columns: 1fr;
-      gap: clamp(2.5rem, 6vw, 4.5rem);
-      align-items: center;
+      gap: clamp(2.75rem, 6vw, 4.5rem);
+      align-items: start;
     }
-    @media (min-width: 900px) {
-      .hero-grid { grid-template-columns: 1.05fr 1fr; }
+    @media (min-width: 920px) {
+      .hero-grid { grid-template-columns: 1.15fr 1fr; align-items: center; }
     }
 
-    .hero h1 { margin-bottom: 1.75rem; }
-    .hero .lede { max-width: 34ch; font-size: clamp(1.05rem, 1.5vw, 1.18rem); color: var(--fg); opacity: 0.86; margin: 0 0 2.25rem; }
-    .hero .lede em { color: var(--accent); font-style: normal; font-weight: 500; }
+    .hero h1 { margin-bottom: 1.6rem; max-width: 14ch; }
+    .hero .lede {
+      max-width: 48ch;
+      font-size: clamp(1.05rem, 1.35vw, 1.18rem);
+      color: var(--ink-soft);
+      line-height: 1.58;
+      margin: 0 0 2.4rem;
+    }
+    .hero .lede em {
+      color: var(--accent);
+      font-style: normal;
+      font-weight: 500;
+    }
 
-    .install { display: flex; flex-direction: column; gap: 0.55rem; max-width: 500px; }
+    /* Install command "card" */
+    .install { display: flex; flex-direction: column; gap: 0.55rem; max-width: 520px; }
     .cmd {
-      display: flex; align-items: center; gap: 0.85rem;
-      background: var(--bg-tint);
-      border: 1px solid var(--rule);
-      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      background: var(--paper-tint);
+      border: 1px solid var(--rule-strong);
+      border-radius: 3px;
       padding: 0.7rem 0.95rem;
-      font-family: "JetBrains Mono", monospace;
+      font-family: "IBM Plex Mono", monospace;
       font-size: 13.5px;
       cursor: pointer;
-      transition: border-color 150ms ease, background 150ms ease;
+      transition: border-color 180ms ease, background 180ms ease;
       user-select: none;
     }
-    .cmd:hover { border-color: var(--accent-soft); }
-    .cmd .prompt { color: var(--fg-dimmer); }
-    .cmd .code { color: var(--fg); flex: 1; }
-    .cmd .copy { color: var(--fg-dim); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; transition: color 150ms ease; }
+    .cmd:hover { border-color: var(--accent); background: var(--paper-rise); }
+    .cmd .prompt { color: var(--ink-fade); }
+    .cmd .code { color: var(--ink); flex: 1; }
+    .cmd .copy {
+      color: var(--ink-dim);
+      font-size: 10.5px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      transition: color 180ms ease;
+    }
     .cmd:hover .copy { color: var(--accent); }
-    .cmd.copied .copy { color: var(--green); }
+    .cmd.copied .copy { color: var(--state-ok); }
 
-    .cta-row { display: flex; gap: 1.5rem; align-items: center; margin-top: 1.75rem; font-family: "JetBrains Mono", monospace; font-size: 12.5px; flex-wrap: wrap; }
-    .cta-row a { color: var(--fg-dim); text-decoration: none; border-bottom: 1px solid transparent; padding-bottom: 2px; transition: color 150ms ease, border-color 150ms ease; }
+    .cta-row {
+      display: flex;
+      gap: 1.75rem;
+      align-items: center;
+      margin-top: 1.9rem;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12.5px;
+      flex-wrap: wrap;
+    }
+    .cta-row a {
+      color: var(--ink-dim);
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+      padding-bottom: 2px;
+      transition: color 180ms ease, border-color 180ms ease;
+    }
     .cta-row a:hover { color: var(--accent); border-color: var(--accent); }
 
-    /* preview frame (right column of hero) */
+    /* Preview panel — printed spec card */
     .preview {
-      background: var(--bg-tint);
-      border: 1px solid var(--rule);
-      border-radius: 6px;
+      background: var(--paper-tint);
+      border: 1px solid var(--rule-strong);
+      border-radius: 3px;
       overflow: hidden;
-      box-shadow: 0 1px 0 rgba(232, 228, 220, 0.02) inset;
     }
     .preview-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0.65rem 1rem;
-      border-bottom: 1px solid var(--rule);
-      background: var(--bg-raised);
-      font-family: "JetBrains Mono", monospace;
-      font-size: 11px;
-      color: var(--fg-dim);
-      letter-spacing: 0.1em;
+      padding: 0.55rem 1.1rem;
+      border-bottom: 1px solid var(--rule-strong);
+      background: var(--paper-rise);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 10.5px;
+      color: var(--ink-dim);
+      letter-spacing: 0.18em;
       text-transform: uppercase;
+      font-weight: 500;
     }
-    .preview-head .tag { color: var(--fg-dimmer); }
-    .preview-body { padding: 1.1rem 1.25rem; font-family: "JetBrains Mono", monospace; font-size: 13.2px; line-height: 2.1; }
-    .state-line { display: flex; align-items: baseline; gap: 0; flex-wrap: wrap; }
-    .state-line .dot { margin-right: 0.55rem; }
-    .state-line .sep { color: var(--fg-dimmer); padding: 0 0.45rem; }
-    .state-line .faint { color: var(--fg-dim); }
+    .preview-head .fig {
+      color: var(--accent);
+      letter-spacing: 0.14em;
+    }
+    .preview-body {
+      padding: 1.35rem 1.35rem 1.45rem;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 13px;
+      line-height: 2.15;
+    }
+    .state-line { display: flex; align-items: baseline; flex-wrap: wrap; }
+    .state-line .dot { margin-right: 0.6rem; font-size: 1em; }
+    .state-line .sep { color: var(--ink-fade); padding: 0 0.45rem; }
+    .state-line .faint { color: var(--ink-dim); }
     .state-line .chip {
-      background: var(--bg-raised);
-      border: 1px solid var(--rule);
-      border-radius: 3px;
-      padding: 0.05em 0.4em;
-      color: var(--fg);
-      font-size: 0.92em;
+      background: var(--paper);
+      border: 1px solid var(--rule-strong);
+      border-radius: 2px;
+      padding: 0.05em 0.42em;
+      color: var(--ink);
+      font-size: 0.94em;
       white-space: nowrap;
     }
-    .state-line.warm .dot, .state-line.warm .label { color: var(--green); }
-    .state-line.low .dot, .state-line.low .label { color: var(--yellow); }
-    .state-line.cold .dot, .state-line.cold .label { color: var(--red); }
-    .state-line.active .dot, .state-line.active .label { color: var(--cyan); }
+    .state-line.warm   .dot, .state-line.warm .label   { color: var(--state-ok); }
+    .state-line.low    .dot, .state-line.low .label    { color: var(--state-warn); }
+    .state-line.cold   .dot, .state-line.cold .label   { color: var(--state-err); }
+    .state-line.active .dot, .state-line.active .label { color: var(--state-active); }
+    .state-line .label { font-weight: 500; }
 
-    /* sections */
-    .sec-tag { font-family: "JetBrains Mono", monospace; font-size: 10.5px; color: var(--fg-dimmer); letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 1.3rem; display: flex; align-items: center; gap: 1rem; }
-    .sec-tag::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
-    section h2 { margin-bottom: 0.9rem; max-width: 22ch; }
-    .intro { max-width: 56ch; color: var(--fg); opacity: 0.82; margin: 0 0 2rem; line-height: 1.55; }
-
-    /* two-column layout for section content */
-    .split { display: grid; grid-template-columns: 1fr; gap: clamp(1.5rem, 4vw, 3rem); align-items: start; }
-    @media (min-width: 860px) {
-      .split { grid-template-columns: 0.9fr 1.1fr; gap: 3rem; align-items: center; }
+    /* Section content */
+    .sec-tag {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 10.5px;
+      color: var(--ink-dim);
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      margin-bottom: 1.35rem;
+      display: flex;
+      align-items: center;
+      gap: 1.1rem;
+      font-weight: 500;
+    }
+    .sec-tag .num { color: var(--accent); }
+    .sec-tag::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--rule);
+    }
+    section h2 { margin-bottom: 1rem; max-width: 22ch; color: var(--ink); }
+    .intro {
+      max-width: 60ch;
+      color: var(--ink-soft);
+      margin: 0 0 2rem;
+      line-height: 1.62;
+      font-size: 1.02rem;
+    }
+    .aside-note {
+      max-width: 58ch;
+      color: var(--ink-dim);
+      font-size: 0.95rem;
+      line-height: 1.55;
+      margin: -0.75rem 0 2rem;
     }
 
-    /* /compress box */
-    .box {
-      background: var(--bg-tint);
-      border: 1px solid var(--rule);
-      border-radius: 5px;
-      padding: 1.2rem 1.5rem;
-      font-family: "JetBrains Mono", monospace;
-      font-size: 13px;
-      line-height: 1.85;
-      overflow-x: auto;
+    /* Section split */
+    .split { display: grid; grid-template-columns: 1fr; gap: clamp(1.75rem, 4vw, 3.25rem); align-items: start; }
+    @media (min-width: 880px) {
+      .split { grid-template-columns: 0.9fr 1.1fr; gap: 3.25rem; align-items: center; }
     }
-    .box .dim { color: var(--fg-dim); }
-    .box .accent { color: var(--accent); }
-    .box .savings { color: var(--green); }
 
-    .codeblock {
-      background: var(--bg-tint);
-      border: 1px solid var(--rule);
-      border-radius: 5px;
-      padding: 1.2rem 1.4rem;
-      font-family: "JetBrains Mono", monospace;
-      font-size: 13px;
+    /* Boxes */
+    .box, .codeblock {
+      background: var(--paper-tint);
+      border: 1px solid var(--rule-strong);
+      border-radius: 3px;
+      padding: 1.25rem 1.5rem;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12.8px;
       line-height: 1.9;
       overflow-x: auto;
-      max-width: 640px;
+      color: var(--ink);
     }
-    .codeblock .comment { color: var(--fg-dimmer); }
-    .codeblock .prompt { color: var(--fg-dimmer); }
+    .box .dim, .codeblock .comment, .codeblock .prompt { color: var(--ink-fade); }
+    .box .accent { color: var(--accent); }
+    .box .savings { color: var(--state-ok); font-weight: 500; }
+    .codeblock { max-width: 640px; }
 
-    /* table */
-    table { width: 100%; border-collapse: collapse; font-family: "JetBrains Mono", monospace; font-size: 13.5px; }
-    table th { text-align: left; padding: 0.65rem 0.9rem; color: var(--fg-dim); font-weight: 400; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; border-bottom: 1px solid var(--rule); }
+    /* Table */
+    table { width: 100%; border-collapse: collapse; font-family: "IBM Plex Mono", monospace; font-size: 13.5px; }
+    table th {
+      text-align: left;
+      padding: 0.65rem 0.95rem 0.75rem;
+      color: var(--ink-dim);
+      font-weight: 500;
+      font-size: 10.5px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      border-bottom: 1.5px solid var(--rule-strong);
+    }
     table th:nth-child(n+2), table td:nth-child(n+2) { text-align: right; }
-    table td { padding: 0.85rem 0.9rem; border-bottom: 1px solid var(--rule); color: var(--fg); }
+    table td {
+      padding: 0.78rem 0.95rem;
+      border-bottom: 1px solid var(--rule);
+      color: var(--ink);
+    }
     table tr:last-child td { border-bottom: none; }
-    table tr.baseline td { color: var(--fg-dim); }
-    table td.saved { color: var(--green); font-weight: 500; }
-    table tr.pick td { background: linear-gradient(90deg, rgba(111,163,209,0.08), rgba(111,163,209,0)); }
-    table tr.pick td.mode { color: var(--accent); }
+    table tr.baseline td { color: var(--ink-dim); font-style: italic; font-family: "Fraunces", serif; }
+    table tr.baseline td.mode { font-style: italic; }
+    table td.saved { color: var(--state-ok); font-weight: 500; }
+    table tr.pick td {
+      background: linear-gradient(90deg, rgba(31, 61, 90, 0.09), rgba(31, 61, 90, 0.01));
+    }
+    table tr.pick td.mode { color: var(--accent); font-weight: 500; }
+    table tr.pick td.mode::before { content: "→ "; color: var(--accent); margin-right: 0.1rem; }
 
-    footer { padding: 2.25rem 0 2.75rem; border-top: 1px solid var(--rule); font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--fg-dimmer); }
-    footer .wrap { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.75rem; }
-    footer a { color: var(--fg-dim); text-decoration: none; transition: color 150ms ease; }
+    /* Footer */
+    footer {
+      padding: 2.5rem 0 3rem;
+      border-top: 1px solid var(--rule);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11.5px;
+      color: var(--ink-fade);
+    }
+    footer .wrap {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 0.9rem;
+    }
+    footer a { color: var(--ink-dim); text-decoration: none; transition: color 180ms ease; }
     footer a:hover { color: var(--accent); }
 
-    @media (max-width: 620px) {
-      .state-line .note { margin-left: 0; padding-left: 0; width: 100%; margin-top: 0.1rem; font-size: 11.5px; }
-    }
     @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
     }
   </style>
 </head>
 <body>
   <header>
     <div class="wrap">
-      <span class="brand"><span class="accent">$</span> claudecompress</span>
+      <span class="brand"><span class="mark">§</span>claudecompress</span>
       <span class="meta">
-        <span>v0.6.4</span>
+        <span>v0.7.0</span>
         <span class="dot-sep">·</span>
         <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
         <span class="dot-sep">·</span>
@@ -233,12 +390,8 @@
     <section class="hero">
       <div class="hero-grid">
         <div>
-          <div class="kicker">for Claude Code</div>
-          <h1>
-            Three things<br />
-            Claude Code<br />
-            is <span class="italic accent">missing</span>.
-          </h1>
+          <div class="kicker">For Claude Code</div>
+          <h1>Three things Claude Code is <span class="italic accent">missing</span>.</h1>
           <p class="lede">A <em>cache-TTL countdown</em> inside the status line, a <code>/compress</code> slash command for mid-session trimming, and an offline trimmer that makes cold <code>/resume</code> cheap again.</p>
 
           <div class="install">
@@ -258,8 +411,8 @@
 
         <aside class="preview" aria-label="Cache status line preview">
           <div class="preview-head">
-            <span>status line</span>
-            <span class="tag">inside claude code</span>
+            <span>Status line · four states</span>
+            <span class="fig">Fig. 1</span>
           </div>
           <div class="preview-body">
             <div class="state-line warm">
@@ -280,18 +433,18 @@
     </section>
 
     <section>
-      <div class="sec-tag">§ 01 — /compress</div>
+      <div class="sec-tag"><span class="num">§ 01</span><span>/compress</span></div>
       <div class="split">
         <div>
           <h2>Trim <span class="italic">without</span> leaving.</h2>
           <p class="intro">Type <code>/compress</code>. A trimmed sibling JSONL is written with a new UUID, savings printed, resume command handed to you. Six modes, surgical to nuclear. Original untouched.</p>
-          <p class="intro" style="margin-top:-1rem;font-size:15px;color:var(--fg-dim)">Or run under <code>ccw</code> — it auto-resumes the trimmed session on <code>Ctrl+C</code>.</p>
+          <p class="aside-note">Or run under <code>ccw</code> — it auto-resumes the trimmed session on <code>Ctrl+C</code>.</p>
         </div>
         <div class="box">
 <span class="dim">┌─ claudecompress ────────────────────────────────┐</span>
-  mode:   focus (last 20) <span class="dim">· dropped thinking</span>
-  tokens: 628.8k <span class="accent">→</span> 126.0k   <span class="savings">(saved ≈ 502.8k)</span>
-  cold $ $9.43 <span class="accent">→</span> $1.89     <span class="savings">(saved ≈ $7.54)</span>
+  mode:   focus (last 15) <span class="dim">· dropped thinking</span>
+  tokens: 628.8k <span class="accent">→</span> 327.0k   <span class="savings">(saved ≈ 301.8k)</span>
+  cold $ $9.43 <span class="accent">→</span> $4.91     <span class="savings">(saved ≈ $4.52)</span>
   trimmed: 17420d99-7152-4359-bfdd…
 <span class="dim">└────────────────────────────────────────────────┘</span>
   <span class="dim">Ctrl+C, then:</span>  claude --resume 17420d99…</div>
@@ -299,26 +452,31 @@
     </section>
 
     <section>
-      <div class="sec-tag">§ 02 — offline trimmer</div>
+      <div class="sec-tag"><span class="num">§ 02</span><span>Offline trimmer</span></div>
       <div class="split">
         <div>
-          <h2>One command,<br /><span class="italic">any</span> session.</h2>
+          <h2>One command, <span class="italic">any</span> session.</h2>
           <p class="intro">For sessions you didn't trim live. Picks up your project, flags staleness, shows per-session cost, writes a new JSONL beside the old.</p>
         </div>
         <div class="codeblock"><span class="prompt">$</span> bunx claudecompress
   <span class="comment"># lists your sessions, staleness, cost</span>
   <span class="comment"># pick a mode, confirm</span>
-  <span class="comment"># new trimmed JSONL written alongside</span></div>
+  <span class="comment"># new trimmed JSONL lands beside the old</span></div>
       </div>
     </section>
 
     <section id="savings">
-      <div class="sec-tag">§ 03 — savings</div>
+      <div class="sec-tag"><span class="num">§ 03</span><span>Savings</span></div>
       <h2>A 761k Opus session, six modes.</h2>
-      <p class="intro">Real numbers. 153 user turns in the session. <code>Focus 15</code> keeps the last 15 back-and-forths verbatim + a dialog trail for everything older — sweet spot if you plan to keep working. <code>Ultra</code> is the nuke.</p>
+      <p class="intro">Real numbers. 153 user turns in the session. <code>Focus 15</code> keeps the last 15 back-and-forths verbatim plus a dialog-only trail of everything older — the sweet spot if you plan to keep working. <code>Ultra</code> is the nuke.</p>
       <table>
         <thead>
-          <tr><th>Mode</th><th>Tokens</th><th>Cold cost</th><th>Saved</th></tr>
+          <tr>
+            <th>Mode</th>
+            <th>Tokens</th>
+            <th>Cold cost</th>
+            <th>Saved</th>
+          </tr>
         </thead>
         <tbody>
           <tr class="baseline"><td class="mode">None (baseline)</td><td>761k</td><td>$11.41</td><td>—</td></tr>
@@ -333,10 +491,10 @@
     </section>
 
     <section id="install">
-      <div class="sec-tag">§ 04 — install</div>
+      <div class="sec-tag"><span class="num">§ 04</span><span>Install</span></div>
       <div class="split">
         <div>
-          <h2>Install. <span class="italic">Restart.</span><br />Done.</h2>
+          <h2>Install. <span class="italic">Restart.</span> Done.</h2>
           <p class="intro">Install global — the status line ticks every second and needs fast startup. Bun preferred, node fine. <code>settings.json</code> is backed up; nothing overwritten without a prompt.</p>
         </div>
         <div class="codeblock"><span class="prompt">$</span> bun add -g claudecompress
@@ -345,14 +503,14 @@
 <span class="prompt">$</span> claudecompress install
 <span class="comment"># pick: hook, status line, or both</span>
 
-<span class="comment"># fully quit &amp; relaunch Claude Code. done.</span></div>
+<span class="comment"># quit and relaunch Claude Code.</span></div>
       </div>
     </section>
   </main>
 
   <footer>
     <div class="wrap">
-      <span>MIT license</span>
+      <span>MIT license · no telemetry</span>
       <span>
         <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
         <span class="dot-sep">·</span>
