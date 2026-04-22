@@ -545,10 +545,26 @@
     .box .savings { color: var(--state-ok); font-weight: 500; }
 
     /* Table — wrap in scroll container; on mobile we also hide the
-       Cold-cost column (in the mobile MQ below) so the table fits. */
+       Cold-cost column (in the mobile MQ below) so the table fits.
+       Symmetric edge fade softens the Focus-5 highlight bar at both
+       ends of the row so it doesn't cut off sharply against the bg. */
     .table-wrap {
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
+      mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        #000 18px,
+        #000 calc(100% - 18px),
+        transparent 100%
+      );
+      -webkit-mask-image: linear-gradient(
+        to right,
+        transparent 0,
+        #000 18px,
+        #000 calc(100% - 18px),
+        transparent 100%
+      );
     }
     table {
       width: 100%;
