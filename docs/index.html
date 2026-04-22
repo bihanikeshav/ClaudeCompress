@@ -17,26 +17,26 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,0..100;1,9..144,300..900,0..100&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     :root {
-      /* Paper & ink */
-      --paper:      #f2ecdf;
-      --paper-tint: #ecdfc5;
-      --paper-rise: #e4d9bd;
+      /* Paper & ink — slightly less yellow, more balanced */
+      --paper:      #f4ede0;
+      --paper-tint: #ede2c8;
+      --paper-rise: #e3d6b6;
       --ink:        #1a1512;
-      --ink-soft:   #3a3229;
-      --ink-dim:    #6f6558;
-      --ink-fade:   #a39684;
-      --rule:       #d6c7a8;
-      --rule-strong:#b9a880;
+      --ink-soft:   #39302a;
+      --ink-dim:    #6e6358;
+      --ink-fade:   #9f9280;
+      --rule:       #d4c5a3;
+      --rule-strong:#b6a37a;
 
-      /* Single accent: Prussian blue */
-      --accent:     #1f3d5a;
-      --accent-dim: #4a6684;
+      /* Single accent: deeper Prussian blue, richer contrast on cream */
+      --accent:     #183a5c;
+      --accent-dim: #3f5e7d;
 
-      /* State palette — muted earth tones readable on cream */
-      --state-ok:     #4f6b2d;  /* olive */
-      --state-warn:   #a67520;  /* mustard / ochre */
-      --state-err:    #8f3f2e;  /* terracotta */
-      --state-active: #2d6876;  /* slate teal */
+      /* State palette — muted earth tones */
+      --state-ok:     #516c2e;  /* forest olive */
+      --state-warn:   #9c6f1d;  /* ochre */
+      --state-err:    #8a3a2b;  /* brick */
+      --state-active: #2b6574;  /* slate teal */
     }
 
     * { box-sizing: border-box; }
@@ -241,7 +241,15 @@
       line-height: 2.15;
     }
     .state-line { display: flex; align-items: baseline; flex-wrap: wrap; }
-    .state-line .dot { margin-right: 0.6rem; font-size: 1em; }
+    /* Fixed slot for the state dot so ◉ (filled) and ○ (hollow) glyphs,
+       which have different metrics in monospace fonts, align cleanly. */
+    .state-line .dot {
+      display: inline-block;
+      width: 1.15ch;
+      text-align: left;
+      margin-right: 0.55rem;
+      font-size: 1em;
+    }
     .state-line .sep { color: var(--ink-fade); padding: 0 0.45rem; }
     .state-line .faint { color: var(--ink-dim); }
     .state-line .chip {
@@ -422,7 +430,7 @@
               <span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span>0:58 left<span class="sep">·</span><span class="faint">Opus 4.7</span>
             </div>
             <div class="state-line cold">
-              <span class="dot">○</span><span class="label">cache cold</span><span class="sep">·</span>12m past<span class="sep">·</span><span class="chip">/compress</span>
+              <span class="dot">○</span><span class="label">cache cold</span><span class="sep">·</span>12m past<span class="sep">·</span>use <span class="chip">/compress</span>
             </div>
             <div class="state-line active">
               <span class="dot">◉</span><span class="label">cache active</span><span class="sep">·</span>agent working<span class="sep">·</span><span class="faint">Opus 4.7</span>
@@ -442,9 +450,9 @@
         </div>
         <div class="box">
 <span class="dim">┌─ claudecompress ────────────────────────────────┐</span>
-  mode:   focus (last 15) <span class="dim">· dropped thinking</span>
-  tokens: 628.8k <span class="accent">→</span> 327.0k   <span class="savings">(saved ≈ 301.8k)</span>
-  cold $ $9.43 <span class="accent">→</span> $4.91     <span class="savings">(saved ≈ $4.52)</span>
+  mode:   focus (last 5) <span class="dim">· dropped thinking</span>
+  tokens: 761k <span class="accent">→</span> 217k       <span class="savings">(saved ≈ 544k)</span>
+  cold $ $11.41 <span class="accent">→</span> $3.25    <span class="savings">(saved ≈ $8.16)</span>
   trimmed: 17420d99-7152-4359-bfdd…
 <span class="dim">└────────────────────────────────────────────────┘</span>
   <span class="dim">Ctrl+C, then:</span>  claude --resume 17420d99…</div>
@@ -468,7 +476,7 @@
     <section id="savings">
       <div class="sec-tag"><span class="num">§ 03</span><span>Savings</span></div>
       <h2>A 761k Opus session, six modes.</h2>
-      <p class="intro">Real numbers. 153 user turns in the session. <code>Focus 15</code> keeps the last 15 back-and-forths verbatim plus a dialog-only trail of everything older — the sweet spot if you plan to keep working. <code>Ultra</code> is the nuke.</p>
+      <p class="intro">Real numbers. 153 user turns in the session. <code>Focus 5</code> is the recommended default — keeps the last 5 back-and-forths verbatim plus a dialog-only trail of everything older. Cuts cold-resume cost by ~70% while leaving enough recent context to keep working. <code>Ultra</code> is the nuke.</p>
       <table>
         <thead>
           <tr>
@@ -482,9 +490,8 @@
           <tr class="baseline"><td class="mode">None (baseline)</td><td>761k</td><td>$11.41</td><td>—</td></tr>
           <tr><td class="mode">Redact</td><td>503k</td><td>$7.54</td><td class="saved">$3.87</td></tr>
           <tr><td class="mode">Recency 15</td><td>574k</td><td>$8.61</td><td class="saved">$2.80</td></tr>
-          <tr><td class="mode">Focus 25</td><td>375k</td><td>$5.63</td><td class="saved">$5.78</td></tr>
-          <tr class="pick"><td class="mode">Focus 15</td><td>327k</td><td>$4.91</td><td class="saved">$6.50</td></tr>
-          <tr><td class="mode">Focus 5</td><td>217k</td><td>$3.25</td><td class="saved">$8.16</td></tr>
+          <tr><td class="mode">Focus 15</td><td>327k</td><td>$4.91</td><td class="saved">$6.50</td></tr>
+          <tr class="pick"><td class="mode">Focus 5</td><td>217k</td><td>$3.25</td><td class="saved">$8.16</td></tr>
           <tr><td class="mode">Ultra</td><td>125k</td><td>$1.88</td><td class="saved">$9.53</td></tr>
         </tbody>
       </table>

@@ -31,6 +31,8 @@ States:
 ◉ new session · cache not yet seeded
 ```
 
+*(The `use /compress` is the command to run; "/compress" is a clickable code-style chip in Claude Code's rendering.)*
+
 Everything reads from the session JSONL Claude Code already writes. No proxy, no API interception.
 
 - **Cache mode.** `cache_creation.ephemeral_1h_input_tokens > 0` → 1h, else 5m.
@@ -45,10 +47,11 @@ Type it in any Claude Code session. The hook trims the current session's JSONL a
 
 ```
 /compress               # Redact (default) + drop thinking
-/compress ultra         # dialog-only
-/compress focus 15      # dialog trail + last 15 user turns verbatim
+/compress focus 5       # recommended: dialog trail + last 5 exchanges verbatim
+/compress focus 15      # keep more recent context
 /compress recency 10    # last 10 user turns verbatim, redact older
 /compress smart         # per-tool rules
+/compress ultra         # nuke it — dialog-only
 /compress truncate 500  # keep first 500 chars per tool_result
 ```
 
@@ -121,16 +124,15 @@ Every trim is logged to `~/.claude/claudecompress/history.jsonl`. The interactiv
 
 **Drop-thinking toggle** (any non-Ultra mode): cuts 200k+ tokens. Claude doesn't re-read prior thinking on resume — free.
 
-Real savings on a 761k-token Opus session (153 user turns):
+Real savings on a 761k-token Opus session (153 user turns). **Focus 5 is the recommended default** — keeps your last 5 exchanges verbatim, dialog-only trail for everything older, cuts cold-resume cost by ~70%.
 
 | Mode | Tokens | Cold cost | Saved |
 |---|---|---|---|
 | None (baseline) | 761k | $11.41 | — |
 | Redact | 503k | $7.54 | $3.87 |
 | Recency 15 | 574k | $8.61 | $2.80 |
-| Focus 25 | 375k | $5.63 | $5.78 |
 | Focus 15 | 327k | $4.91 | $6.50 |
-| Focus 5 | 217k | $3.25 | $8.16 |
+| **Focus 5** ← recommended | **217k** | **$3.25** | **$8.16** |
 | Ultra | 125k | $1.88 | $9.53 |
 
 Cost estimates use each model's actual input rate (Opus 4.7/4.6, Sonnet 4.6, Haiku 4.5). Token count is a char-based approximation — within ~10% of Anthropic's tokenizer.
