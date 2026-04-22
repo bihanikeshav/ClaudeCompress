@@ -1,10 +1,10 @@
 # claudecompress
 
-Three things for Claude Code, from one install:
+Three things, one install:
 
-1. **Live cache-TTL status line** in Claude Code's UI — countdown that tells you when the prompt cache will expire. Auto-detects 5-minute vs 1-hour ephemeral cache mode.
-2. **`/compress` slash command** — trim the active session on-demand without leaving Claude Code.
-3. **Interactive trimmer** (`bunx claudecompress`) — retrospective surgery on any saved JSONL, for cheaper cold `/resume`.
+1. **Cache-TTL status line.** Countdown until your prompt cache expires. Detects 5m vs 1h ephemeral mode.
+2. **`/compress` slash command.** Trim the active session on-demand, inside Claude Code.
+3. **Interactive trimmer** (`bunx claudecompress`). Trim any saved JSONL for cheaper cold `/resume`.
 
 ## Quick start
 
@@ -21,23 +21,23 @@ Verify the statusLine appears at the bottom of any Claude Code session. Type `/c
 
 ## The cache timer
 
-Rendered inside Claude Code's native status line. States:
+States:
 
 ```
 ◉ cache warm · 5m · 4:32 left · Opus 4.7
 ◉ cache warm · 5m · 0:58 left · Opus 4.7
-○ cache cold · 12m past · /compress
+○ cache cold · 12m past · use /compress
 ◉ cache active · agent working · Opus 4.7
 ◉ new session · cache not yet seeded
 ```
 
-**How it works.** Everything comes from fields Claude Code already writes to the session JSONL — no proxy, no API interception.
+Everything reads from the session JSONL Claude Code already writes. No proxy, no API interception.
 
-- **Cache mode.** `cache_creation.ephemeral_1h_input_tokens > 0` → 1h mode, else 5m. Displayed in the line.
-- **"Agent working" state.** Latest assistant record with `stop_reason` in `{tool_use, pause_turn}` → mid-turn. Unknown or missing stop_reasons default to terminal (safer failure mode).
-- **Idle countdown.** Terminal `stop_reason` (`end_turn`, `max_tokens`, `stop_sequence`, `refusal`) → counts down from that record's timestamp. Zero crossing → `cold`.
-- **Client-side commands filtered.** `/context`, `/clear`, `/compact` and friends write user records that never await a reply. Skipped so they don't lock the display into "working".
-- **Polling.** Claude Code invokes the statusLine every second via `refreshInterval: 1`. We cache parsed state at `~/.claude/claudecompress/statusline-cache-<sid>.json` keyed on JSONL mtime + size — idle ticks skip parsing entirely.
+- **Cache mode.** `cache_creation.ephemeral_1h_input_tokens > 0` → 1h, else 5m.
+- **Agent working.** Latest assistant record with `stop_reason` in `{tool_use, pause_turn}` → mid-turn. Unknown reasons default to terminal.
+- **Idle countdown.** Terminal `stop_reason` (`end_turn`, `max_tokens`, `stop_sequence`, `refusal`) → counts down from that timestamp. Zero → cold.
+- **Client-side commands filtered.** `/context`, `/clear`, `/compact` write user records that never get a reply. Skipped so they don't lock the display into "working".
+- **Polling.** Claude Code ticks the statusLine every second (`refreshInterval: 1`). Parsed state cached at `~/.claude/claudecompress/statusline-cache-<sid>.json`, keyed on JSONL mtime+size. Idle ticks skip the parse.
 
 ## `/compress` slash command
 
@@ -65,13 +65,13 @@ Hook output:
     claude --resume 17420d99-7152-4359-bfdd-34c2cefe77e3
 ```
 
-The original session JSONL is never modified — a new file is written alongside it with a fresh UUID and a `[TRIMMED by claudecompress]` prefix on the first user message (so you can pick it out of the `/resume` list).
+Original JSONL is never touched. The trimmed sibling gets a fresh UUID and a `[TRIMMED by claudecompress]` prefix on the first user message — obvious in `/resume`.
 
-`/compress` writes a trimmed sibling JSONL; it can't mutate the running session (only `/compact` can, since it's in-process). You Ctrl+C and `--resume` the new UUID — or use `ccw` below to auto-resume.
+The running session can't be mutated from a hook — only `/compact` can, since it's in-process. So you Ctrl+C and `--resume` the new UUID, or use `ccw` to skip that.
 
 ## `ccw` — auto-resume wrapper
 
-Closes the gap: `/compress` → Ctrl+C → `ccw` auto-respawns `claude --resume <new-hash>`. No manual resume command.
+After `/compress`, Ctrl+C — `ccw` respawns `claude --resume <new-hash>` for you.
 
 ```bash
 ccw                                    # same args as `claude`
@@ -88,7 +88,7 @@ Cross-platform (Windows, macOS, Linux). Requires the `claude` CLI on your PATH.
 
 ## Interactive trimmer
 
-For one-shot trimming of any saved session — no install required:
+Trim any saved session, no install:
 
 ```bash
 bunx claudecompress
@@ -96,7 +96,7 @@ bunx claudecompress
 npx claudecompress
 ```
 
-Auto-detects the current project's sessions, shows each session's size + cache staleness (warm/cold/very-cold from mtime) + estimated cold-`/resume` cost in USD. Pick a mode, get a new JSONL alongside the original.
+Lists the current project's sessions with size, cache staleness (warm/cold/very-cold by mtime), and estimated cold-resume cost. Pick a mode; new JSONL lands next to the original.
 
 Also:
 
@@ -117,7 +117,7 @@ Every trim is logged to `~/.claude/claudecompress/history.jsonl`. The interactiv
 | **Ultra** | heavy | user + assistant text only; tools/thinking all dropped |
 | **Truncate N** | manual | keep first N chars of every tool_result |
 
-**Drop-thinking toggle** on any non-Ultra mode: cuts 200k+ tokens of thinking blocks. Claude doesn't re-read prior thinking on resume, so this is free savings.
+**Drop-thinking toggle** (any non-Ultra mode): cuts 200k+ tokens. Claude doesn't re-read prior thinking on resume — free.
 
 Real savings on a 760k-token Opus session:
 
@@ -158,11 +158,11 @@ Existing custom `statusLine` entries are never overwritten without explicit conf
 
 ### Why global install (and bun)
 
-The statusLine polls once per second. Under `npx`, every tick would pay ~500 ms of npm cold-start — burn half a CPU for nothing. Global install keeps startup in the 10–50 ms range. If `claudecompress` isn't on PATH, the installer skips the statusLine with clear guidance.
+The statusLine ticks every second. Under `npx`, each tick eats ~500ms of npm cold-start — half a CPU for nothing. Global install runs in 10–50ms. Installer skips the statusLine if `claudecompress` isn't on PATH.
 
-**Bun is preferred over node.** ~3× faster startup (~10–15 ms vs ~30–50 ms), so per-second ticks feel smoother. Installer detects `bun` on PATH and writes `bun <dist>/index.js statusline` automatically.
+**Bun is preferred over node.** ~3× faster startup (~10–15 ms vs ~30–50 ms). Installer detects `bun` on PATH and writes `bun <dist>/index.js statusline` automatically.
 
-The `/compress` hook works fine under `npx` — it fires once per user-typed `/compress`, not continuously.
+The `/compress` hook is fine under `npx` — it fires once per user-typed `/compress`, not continuously.
 
 ## Architecture notes
 
@@ -179,7 +179,7 @@ The `/compress` hook works fine under `npx` — it fires once per user-typed `/c
 | [context-mode](https://github.com/mksglu/context-mode) | MCP sandbox + SQLite-backed tool output | During session |
 | **claudecompress** | Cache visibility + `/compress` + retrospective trimming | Anytime |
 
-Complementary. rtk and context-mode prevent new bloat from entering context. claudecompress surfaces cache state live and fixes bloat that's already there — including thinking blocks, Claude's native `Read`/`Grep` output, non-sandboxed MCP responses, and pre-existing long sessions.
+rtk and context-mode stop new bloat at ingress. claudecompress shows cache state and cleans bloat that's already in the session: thinking blocks, native `Read`/`Grep`, non-sandboxed MCP, long existing sessions.
 
 ## Uninstall
 

@@ -239,7 +239,7 @@
             Claude Code<br />
             is <span class="italic accent">missing</span>.
           </h1>
-          <p class="lede">A <em>cache-TTL countdown</em> inside the status line, a <em>/compress</em> slash command for mid-session trimming, and an offline trimmer that makes cold <code>/resume</code> cheap again.</p>
+          <p class="lede">A <em>cache-TTL countdown</em> inside the status line, a <code>/compress</code> slash command for mid-session trimming, and an offline trimmer that makes cold <code>/resume</code> cheap again.</p>
 
           <div class="install">
             <div class="cmd" data-copy="bun add -g claudecompress">
@@ -284,8 +284,8 @@
       <div class="split">
         <div>
           <h2>Trim <span class="italic">without</span> leaving.</h2>
-          <p class="intro">Type <code>/compress</code> in any session. The hook writes a trimmed sibling with a fresh UUID, prints what you saved, and tells you what to resume. Six modes from surgical to nuclear. Original JSONL untouched.</p>
-          <p class="intro" style="margin-top:-1rem;font-size:15px;color:var(--fg-dim)">For seamless exits, <code>ccw</code> wraps <code>claude</code> and auto-resumes into the trimmed session on <code>Ctrl+C</code>.</p>
+          <p class="intro">Type <code>/compress</code>. A trimmed sibling JSONL is written with a new UUID, savings printed, resume command handed to you. Six modes, surgical to nuclear. Original untouched.</p>
+          <p class="intro" style="margin-top:-1rem;font-size:15px;color:var(--fg-dim)">Or run under <code>ccw</code> — it auto-resumes the trimmed session on <code>Ctrl+C</code>.</p>
         </div>
         <div class="box">
 <span class="dim">┌─ claudecompress ────────────────────────────────┐</span>
@@ -303,7 +303,7 @@
       <div class="split">
         <div>
           <h2>One command,<br /><span class="italic">any</span> session.</h2>
-          <p class="intro">For sessions you didn't trim in the moment. The picker auto-detects your project, flags cache staleness, shows cost per-session, writes a new JSONL alongside the old.</p>
+          <p class="intro">For sessions you didn't trim live. Picks up your project, flags staleness, shows per-session cost, writes a new JSONL beside the old.</p>
         </div>
         <div class="codeblock"><span class="prompt">$</span> bunx claudecompress
   <span class="comment"># lists your sessions, staleness, cost</span>
@@ -315,7 +315,7 @@
     <section id="savings">
       <div class="sec-tag">§ 03 — savings</div>
       <h2>A 760k Opus session, six modes.</h2>
-      <p class="intro">Real numbers. Focus 500 is the sweet spot for "I want to keep working" — the last 500 turns verbatim, a dialog trail for everything before. Ultra is the nuclear option.</p>
+      <p class="intro">Real numbers. Focus 500 keeps the last 500 turns verbatim with a dialog trail before that — best if you plan to keep working. Ultra is the nuke.</p>
       <table>
         <thead>
           <tr><th>Mode</th><th>Tokens</th><th>Cold cost</th><th>Saved</th></tr>
@@ -336,7 +336,7 @@
       <div class="split">
         <div>
           <h2>Install. <span class="italic">Restart.</span><br />Done.</h2>
-          <p class="intro">Global install required — the status line ticks once per second and needs fast startup. Bun is preferred; node works fine. Installer backs up your <code>settings.json</code> and never overwrites anything without asking.</p>
+          <p class="intro">Install global — the status line ticks every second and needs fast startup. Bun preferred, node fine. <code>settings.json</code> is backed up; nothing overwritten without a prompt.</p>
         </div>
         <div class="codeblock"><span class="prompt">$</span> bun add -g claudecompress
 <span class="comment"># or: npm i -g claudecompress</span>
