@@ -83,6 +83,30 @@ function isClientSideCommandRecord(rec: any): boolean {
   return /^\/[a-zA-Z][\w:-]*(\s|$)/.test(trimmed);
 }
 
+/**
+ * Claude Code writes a synthetic user record when the user aborts mid-turn
+ * (ESC / Ctrl-C). Two shapes observed in the wild:
+ *   content: [{ type:"text", text:"[Request interrupted by user]" }]
+ *   content: [{ type:"text", text:"[Request interrupted by user for tool use]" }]
+ *
+ * After this, no API call is coming until the user prompts again — the
+ * session is idle and the cache is decaying from the interrupt timestamp.
+ */
+function isInterruptRecord(rec: any): boolean {
+  const content = rec?.message?.content;
+  if (!Array.isArray(content)) return false;
+  for (const blk of content) {
+    if (
+      blk?.type === "text" &&
+      typeof blk.text === "string" &&
+      blk.text.startsWith("[Request interrupted by user")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function readTail(path: string, size: number, maxBytes = 500_000): string {
   if (size <= maxBytes) return readFileSync(path, "utf8");
   const fd = openSync(path, "r");
@@ -126,6 +150,7 @@ function parseLatest(
     stop_reason: string | null;
   } | null = null;
   let lastUserTs: string | null = null;
+  let lastUserInterrupted = false;
 
   for (let i = lines.length - 1; i >= 0; i -= 1) {
     const line = lines[i];
@@ -137,8 +162,10 @@ function parseLatest(
       continue;
     }
     const ts: string | null = rec?.timestamp ?? null;
-    if (!lastUserTs && rec?.type === "user" && !isClientSideCommandRecord(rec))
+    if (!lastUserTs && rec?.type === "user" && !isClientSideCommandRecord(rec)) {
       lastUserTs = ts;
+      lastUserInterrupted = isInterruptRecord(rec);
+    }
     if (!assistant && rec?.type === "assistant") {
       const msg = rec?.message;
       const usage: Usage | undefined = msg?.usage;
@@ -164,8 +191,20 @@ function parseLatest(
     last_stop_reason: assistant?.stop_reason ?? null,
     is_1h_cache:
       (assistant?.usage.cache_creation?.ephemeral_1h_input_tokens ?? 0) > 0,
+    last_user_interrupted: lastUserInterrupted,
   };
 }
+
+/**
+ * Grace window for a fresh assistant(tool_use) record. Within this window the
+ * tool is assumed to be executing normally (fast tools return in <1s; even a
+ * slow one is probably just working). Past it, we treat the session as blocked
+ * — on a permission prompt, a TTY subprocess, or a genuinely long tool — and
+ * start showing the countdown. Cache keeps decaying from the assistant ts
+ * regardless; the grace just controls whether we hide that fact behind
+ * "agent working" momentarily.
+ */
+const TOOL_USE_GRACE_SEC = 30;
 
 function fmtRemaining(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
@@ -251,24 +290,48 @@ export async function runStatusline(): Promise<void> {
     : null;
   const userTs = latest.last_user_ts ? new Date(latest.last_user_ts) : null;
 
-  // State machine:
-  //  - "working": user just submitted with no assistant reply yet, OR the
-  //    latest assistant record is at a non-terminal stop_reason (tool_use /
-  //    pause_turn). While working, the agent is by definition actively
-  //    holding the cache "in use" from the user's point of view — even if
-  //    a long-running tool means no API call has happened in the last 5min,
-  //    the cache will be refreshed on the next call. Showing "cold" here
-  //    would be both technically debatable and UX-wrong: the user can't
-  //    run /compress mid-turn anyway.
-  //  - Idle (terminal stop_reason, no newer user message): count down from
-  //    the last assistant timestamp. That's when the cache stops being
-  //    refreshed and starts actually ticking toward expiry.
+  // State machine (four cases, only two outputs):
+  //
+  //  A. user record is newer AND it's NOT an interrupt
+  //     → tool_result landed, or user just prompted; an API call is in-flight
+  //     → "agent working" (cache being actively read, no countdown useful)
+  //
+  //  B. assistant record is newer with non-terminal stop_reason
+  //     (tool_use / pause_turn), AND age < 30s
+  //     → tool just dispatched, probably running fast
+  //     → "agent working" (cache was just refreshed by the API call that
+  //        emitted this record; grace window before we declare "blocked")
+  //
+  //  C. user record is newer AND IS an interrupt marker
+  //     → user hit ESC; session idle, cache decaying from interrupt ts
+  //     → countdown from max(userTs, assistantTs)
+  //
+  //  D. assistant with tool_use AND age ≥ 30s
+  //     → blocked on permission prompt / TTY / genuinely slow tool;
+  //        from the cache's POV this is indistinguishable from idle
+  //     → countdown from assistantTs
+  //
+  //  E. assistant with terminal stop_reason (end_turn, max_tokens, …)
+  //     → normal idle between turns
+  //     → countdown from assistantTs
+  //
+  // The countdown anchor is max(userTs, assistantTs) — for C this picks the
+  // interrupt ts; for D/E it picks the assistant ts (user records are older
+  // in those cases).
   const userNewer =
     userTs !== null &&
     (assistantTs === null || userTs.getTime() > assistantTs.getTime());
   const midTurn =
     assistantTs !== null && !isTerminalStopReason(latest.last_stop_reason);
-  const working = userNewer || midTurn;
+
+  let working = false;
+  if (userNewer && !latest.last_user_interrupted) {
+    working = true; // case A
+  } else if (midTurn && assistantTs) {
+    const ageSec = (Date.now() - assistantTs.getTime()) / 1000;
+    if (ageSec < TOOL_USE_GRACE_SEC) working = true; // case B
+    // else fall through to countdown (case D)
+  }
 
   if (working) {
     process.stdout.write(
@@ -278,14 +341,22 @@ export async function runStatusline(): Promise<void> {
   }
 
   if (!assistantTs) {
+    // No cache-bearing assistant record yet. Interrupt in a fresh session
+    // lands here too (no cache to expire anyway).
     process.stdout.write(
       `${dim("◉ new session · cache not yet seeded")}${modelTag}`,
     );
     return;
   }
 
+  // Countdown anchor: whichever of the two is more recent. For interrupts,
+  // that's the user record; for terminal/blocked assistants, the assistant.
+  const anchorMs = Math.max(
+    assistantTs.getTime(),
+    userTs?.getTime() ?? -Infinity,
+  );
   const ttlSec = latest.is_1h_cache ? 3600 : 300;
-  const ageSec = (Date.now() - assistantTs.getTime()) / 1000;
+  const ageSec = (Date.now() - anchorMs) / 1000;
   const remainingSec = ttlSec - ageSec;
   const mode = latest.is_1h_cache ? "1h" : "5m";
 

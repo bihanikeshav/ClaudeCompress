@@ -6,3 +6,4 @@ bun.lock
 *.log
 .env
 .env.*
+launch-posts.md

@@ -16,6 +16,13 @@ export interface StatuslineCache {
   last_user_ts: string | null;
   last_stop_reason: string | null;
   is_1h_cache: boolean;
+  /**
+   * True when the latest non-client-side user record is a Claude Code
+   * interrupt marker (content block is text starting with
+   * "[Request interrupted by user"). Signals the agent was aborted and is
+   * now idle — cache is decaying from that timestamp, not hot.
+   */
+  last_user_interrupted: boolean;
 }
 
 function cacheDir(): string {

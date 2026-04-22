@@ -53,6 +53,7 @@
     }
 
     * { box-sizing: border-box; }
+    html, body { overflow-x: clip; }
     html { scroll-behavior: smooth; }
     body {
       margin: 0;
@@ -206,11 +207,15 @@
     /* ASCII "CLAUDE CODE" hero mark — ANSI Shadow figlet, no bloom. */
     .cc-ascii {
       font-family: ui-monospace, Menlo, Consolas, monospace;
-      font-size: clamp(0.44rem, 0.88vw, 0.72rem);
+      /* Sized to fit viewport on narrow screens; clamp low end to vw so 85
+         cols still fit a 360px phone without forcing page zoom. */
+      font-size: clamp(5px, 1.7vw, 0.72rem);
       line-height: 1.05;
       color: var(--accent);
       margin: 0 0 0.35rem;
       white-space: pre;
+      width: 100%;
+      max-width: 100%;
       overflow-x: auto;
       overflow-y: hidden;
       font-weight: 400;
@@ -260,53 +265,95 @@
       color: var(--fg);
     }
 
-    /* Install commands — accessible <button> with reset + custom styling */
-    .install {
-      display: flex;
-      flex-direction: column;
-      gap: 0.55rem;
-      max-width: 520px;
-    }
-    .cmd {
-      /* button reset */
-      appearance: none;
-      font: inherit;
-      text-align: left;
-      width: 100%;
-      /* layout */
+    /* Install block — tabbed package-manager switch + unified copy */
+    .install { max-width: 520px; }
+    .install-box {
       position: relative;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      gap: 0.9rem;
       background: #000;
       border: 1px solid var(--rule);
-      border-radius: 8px;
-      padding: 0.72rem 0.95rem;
-      font-family: "IBM Plex Mono", monospace;
-      font-size: 13.5px;
-      color: var(--fg);
-      cursor: pointer;
+      border-radius: 10px;
+      overflow: hidden;
       transition: border-color 180ms ease;
-      user-select: none;
+      box-shadow:
+        0 8px 28px rgba(0, 0, 0, 0.5),
+        0 2px 6px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
     }
-    .cmd:hover,
-    .cmd:focus-visible {
-      border-color: var(--accent-soft);
+    .install-box:hover { border-color: var(--accent-soft); }
+    .install-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0.65rem 0.5rem 0.55rem;
+      border-bottom: 1px solid var(--rule);
+      background: rgba(255, 255, 255, 0.02);
     }
-    .cmd:focus-visible { outline-offset: 2px; }
-    .cmd:active { transform: translateY(0.5px); }
-    .cmd .prompt { color: var(--fg-fade); }
-    .cmd .code { color: var(--fg); flex: 1; }
-    .cmd .copy {
+    .install-tabs { display: flex; gap: 0.15rem; }
+    .install-tab {
+      appearance: none;
+      background: transparent;
+      border: 0;
+      font: inherit;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11.5px;
+      letter-spacing: 0.06em;
       color: var(--fg-dim);
+      padding: 0.3rem 0.7rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: color 160ms ease, background 160ms ease;
+    }
+    .install-tab:hover { color: var(--fg-soft); }
+    .install-tab[aria-selected="true"] {
+      color: var(--accent);
+      background: var(--accent-tint);
+    }
+    .install-tab:focus-visible { outline-offset: 2px; }
+    .install-copy {
+      appearance: none;
+      background: transparent;
+      border: 0;
+      font: inherit;
+      font-family: "IBM Plex Mono", monospace;
       font-size: 10.5px;
       letter-spacing: 0.14em;
       text-transform: uppercase;
+      color: var(--fg-dim);
+      cursor: pointer;
+      padding: 0.3rem 0.5rem;
+      border-radius: 6px;
       transition: color 180ms ease;
     }
-    .cmd:hover .copy { color: var(--accent); }
-    .cmd.copied .copy { color: var(--state-ok); }
+    .install-copy:hover { color: var(--accent); }
+    .install-box.copied .install-copy { color: var(--state-ok); }
+    .install-copy:focus-visible { outline-offset: 2px; }
+    .install-lines {
+      padding: 0.75rem 0.95rem 0.85rem;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 13.5px;
+      color: var(--fg);
+      user-select: text;
+      overflow-x: auto;
+    }
+    .cmd-line {
+      display: flex;
+      gap: 0.9rem;
+      align-items: baseline;
+      padding: 0.15rem 0;
+      white-space: nowrap;
+    }
+    .cmd-line .prompt {
+      color: var(--fg-fade);
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .cmd-line .code { color: var(--fg); }
+    .cmd-line .code.comment { color: var(--fg-dim); }
+    /* Exclude $ prompts from selection-to-copy everywhere a shell line is shown */
+    .box .prompt, .codeblock .prompt {
+      user-select: none;
+      -webkit-user-select: none;
+    }
 
     .cta-row {
       display: flex;
@@ -343,7 +390,18 @@
         inset 0 1px 0 rgba(255, 255, 255, 0.04);
     }
     @media (max-width: 919px) {
-      .preview { margin-top: clamp(2rem, 4vw, 3rem); }
+      /* On mobile the hero-below collapses to one column; let each item
+         use the grid gap for rhythm instead of an extra margin-top. */
+      .preview { margin-top: 0; max-width: 100%; }
+      /* Flatten the text column into the grid so preview can sit between
+         install and the CTA row — reads better on a phone. */
+      .hero-below { gap: clamp(1.5rem, 4vw, 2.25rem); }
+      .hero-below > div:not(.preview) { display: contents; }
+      .hero-below > div > h1       { order: 1; }
+      .hero-below > div > .lede    { order: 2; }
+      .hero-below > div > .install { order: 3; }
+      .hero-below > .preview       { order: 4; }
+      .hero-below > div > .cta-row { order: 5; margin-top: 0.25rem; }
     }
     .preview-head {
       padding: 0.55rem 1.1rem;
@@ -459,7 +517,9 @@
       margin: 0 0 0.7rem;
       font-weight: 500;
     }
-    .demo-row .codeblock { max-width: none; }
+    @media (min-width: 880px) {
+      .demo-row .codeblock { max-width: none; }
+    }
 
     /* Code blocks — pure black surface, contrasts warm-dark page */
     .box, .codeblock {
@@ -470,6 +530,7 @@
       font-family: "IBM Plex Mono", monospace;
       font-size: 12.8px;
       line-height: 1.85;
+      max-width: 100%;
       overflow-x: auto;
       white-space: pre;
       color: var(--fg);
@@ -483,16 +544,11 @@
     .box .accent { color: var(--accent); }
     .box .savings { color: var(--state-ok); font-weight: 500; }
 
-    /* Table — wrap in scroll container for narrow screens */
+    /* Table — wrap in scroll container; on mobile we also hide the
+       Cold-cost column (in the mobile MQ below) so the table fits. */
     .table-wrap {
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
-      /* subtle fade mask on the right edge to signal scrollability */
-      mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 20px), transparent 100%);
-      -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 20px), transparent 100%);
-    }
-    @media (min-width: 520px) {
-      .table-wrap { mask-image: none; -webkit-mask-image: none; }
     }
     table {
       width: 100%;
@@ -523,7 +579,7 @@
     table tr.baseline td { color: var(--fg-dim); }
     table td.saved { color: var(--state-ok); font-weight: 500; }
     table tr.pick td {
-      background: linear-gradient(90deg, var(--accent-tint), transparent 80%);
+      background: rgba(226, 112, 76, 0.08);
     }
     table tr.pick td.mode {
       color: var(--accent);
@@ -596,19 +652,6 @@
       animation: dot-pulse 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     }
 
-    /* Copy-command ripple — expands from click point, fades out */
-    .cmd .ripple {
-      position: absolute;
-      pointer-events: none;
-      background: var(--accent);
-      opacity: 0.22;
-      border-radius: 50%;
-      transform: scale(0);
-      animation: ripple-expand 540ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
-    }
-    @keyframes ripple-expand {
-      to { transform: scale(3); opacity: 0; }
-    }
 
     /* Respect user preference — strip all motion */
     @media (prefers-reduced-motion: reduce) {
@@ -636,9 +679,26 @@
       .install { max-width: 100%; }
       /* Section tag label less aggressive letter-spacing on small viewports */
       .sec-tag { letter-spacing: 0.18em; }
-      /* Code blocks — tighter padding but preserve pre wrapping */
-      .box, .codeblock { padding: 1rem 1.1rem; font-size: 12px; }
+      /* Code blocks — shrink font so the ~50-char ASCII frame fits a phone
+         viewport without horizontal scroll. */
+      .box, .codeblock { padding: 0.85rem 0.9rem; font-size: clamp(9.5px, 2.7vw, 12px); }
       .codeblock { max-width: 100%; }
+      /* Savings table — drop the Cold-cost column and let the remaining
+         three (Mode / Tokens / Saved) shrink to viewport width. */
+      #savings table th:nth-child(3),
+      #savings table td:nth-child(3) { display: none; }
+      #savings table {
+        min-width: 0;
+        font-size: 12px;
+        table-layout: fixed;
+      }
+      #savings table th,
+      #savings table td { padding: 0.6rem 0.55rem; }
+      #savings table th:first-child,
+      #savings table td:first-child { padding-left: 0; }
+      #savings table th:last-child,
+      #savings table td:last-child { padding-right: 0; }
+      #savings .mode { white-space: normal; word-break: break-word; }
       /* CTA row spacing tighter */
       .cta-row { gap: 1.25rem; margin-top: 1.4rem; }
       /* Header meta wraps under brand smoothly (already flex-wrap); tighten gap */
@@ -648,7 +708,8 @@
     /* Very narrow phones (≤380px) — more aggressive tightening */
     @media (max-width: 380px) {
       .hero .lede { font-size: 0.96rem; }
-      .cmd { font-size: 12.5px; padding: 0.65rem 0.85rem; }
+      .install-lines { font-size: 12.5px; padding: 0.65rem 0.85rem 0.75rem; }
+      .install-tab { font-size: 11px; padding: 0.28rem 0.6rem; }
       .cta-row { font-size: 11.5px; gap: 1rem; }
     }
   </style>
@@ -658,7 +719,7 @@
     <div class="wrap">
       <span class="brand"><span class="mark">◉</span>claudecompress</span>
       <span class="meta">
-        <span>v0.7.0</span>
+        <span id="npm-version">v0.7.0</span>
         <span class="dot-sep">·</span>
         <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
         <span class="dot-sep">·</span>
@@ -685,12 +746,25 @@
             <p class="lede">A live <em>cache-TTL countdown</em> in your status line, and a trimmer that keeps cold <code>/resume</code> cheap.</p>
 
             <div class="install">
-              <button type="button" class="cmd" data-copy="bun add -g claudecompress" aria-label="Copy: bun add -g claudecompress">
-                <span class="prompt" aria-hidden="true">$</span><span class="code">bun add -g claudecompress</span><span class="copy" aria-hidden="true">copy</span>
-              </button>
-              <button type="button" class="cmd" data-copy="claudecompress install" aria-label="Copy: claudecompress install">
-                <span class="prompt" aria-hidden="true">$</span><span class="code">claudecompress install</span><span class="copy" aria-hidden="true">copy</span>
-              </button>
+              <div class="install-box" data-install>
+                <div class="install-head">
+                  <div class="install-tabs" role="tablist" aria-label="Package manager">
+                    <button type="button" role="tab" class="install-tab" aria-selected="true" data-pm="bun">bun</button>
+                    <button type="button" role="tab" class="install-tab" aria-selected="false" data-pm="npm">npm</button>
+                  </div>
+                  <button type="button" class="install-copy" aria-label="Copy install commands">copy</button>
+                </div>
+                <div class="install-lines">
+                  <div class="cmd-line">
+                    <span class="prompt" aria-hidden="true">$</span>
+                    <span class="code" data-install-cmd data-bun="bun add -g claudecompress" data-npm="npm i -g claudecompress">bun add -g claudecompress</span>
+                  </div>
+                  <div class="cmd-line">
+                    <span class="prompt" aria-hidden="true">$</span>
+                    <span class="code">claudecompress install</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div class="cta-row">
@@ -785,9 +859,30 @@
             <h2>Install. <span class="italic">Restart.</span> Done.</h2>
             <p class="intro">Install global. The status line ticks every second and needs fast startup. Bun preferred, node fine. <code>settings.json</code> is backed up; nothing overwritten without a prompt.</p>
           </div>
-          <div class="codeblock"><span class="prompt">$</span> bun add -g claudecompress  <span class="comment"># or: npm i -g claudecompress</span>
-<span class="prompt">$</span> claudecompress install       <span class="comment"># pick hook + statusLine</span>
-<span class="comment"># quit and relaunch Claude Code</span></div>
+          <div class="install">
+            <div class="install-box" data-install>
+              <div class="install-head">
+                <div class="install-tabs" role="tablist" aria-label="Package manager">
+                  <button type="button" role="tab" class="install-tab" aria-selected="true" data-pm="bun">bun</button>
+                  <button type="button" role="tab" class="install-tab" aria-selected="false" data-pm="npm">npm</button>
+                </div>
+                <button type="button" class="install-copy" aria-label="Copy install commands">copy</button>
+              </div>
+              <div class="install-lines">
+                <div class="cmd-line">
+                  <span class="prompt" aria-hidden="true">$</span>
+                  <span class="code" data-install-cmd data-bun="bun add -g claudecompress" data-npm="npm i -g claudecompress">bun add -g claudecompress</span>
+                </div>
+                <div class="cmd-line">
+                  <span class="prompt" aria-hidden="true">$</span>
+                  <span class="code">claudecompress install</span>
+                </div>
+                <div class="cmd-line">
+                  <span class="code comment"># then quit and relaunch Claude Code</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -809,43 +904,55 @@
   <script>
     const REDUCE_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    // --- copy-to-clipboard + ripple --------------------------------------
-    for (const el of document.querySelectorAll(".cmd")) {
-      el.addEventListener("click", async (ev) => {
-        // Ripple emanating from the click point (skip under reduced motion)
-        if (!REDUCE_MOTION) {
-          const rect = el.getBoundingClientRect();
-          const r = document.createElement("span");
-          r.className = "ripple";
-          const size = Math.max(rect.width, rect.height);
-          r.style.width = r.style.height = size + "px";
-          r.style.left = (ev.clientX - rect.left - size / 2) + "px";
-          r.style.top = (ev.clientY - rect.top - size / 2) + "px";
-          el.appendChild(r);
-          setTimeout(() => r.remove(), 580);
-        }
+    // --- install boxes: package-manager tabs + unified copy --------------
+    for (const box of document.querySelectorAll("[data-install]")) {
+      const tabs = box.querySelectorAll(".install-tab");
+      const swap = box.querySelector("[data-install-cmd]");
+      const copyBtn = box.querySelector(".install-copy");
 
-        const text = el.dataset.copy || "";
-        const label = el.querySelector(".copy");
-        const original = label.textContent;
+      const render = (pm) => {
+        if (swap) swap.textContent = swap.dataset[pm] || swap.textContent;
+        for (const t of tabs) t.setAttribute("aria-selected", String(t.dataset.pm === pm));
+      };
+
+      for (const t of tabs) {
+        t.addEventListener("click", () => render(t.dataset.pm));
+      }
+
+      copyBtn?.addEventListener("click", async () => {
+        const lines = [...box.querySelectorAll(".install-lines .cmd-line .code")]
+          .filter(el => !el.classList.contains("comment"))
+          .map(el => el.textContent.trim())
+          .filter(Boolean)
+          .join("\n");
+        const original = copyBtn.textContent;
         try {
-          await navigator.clipboard.writeText(text);
-          el.classList.add("copied");
-          label.textContent = "copied";
+          await navigator.clipboard.writeText(lines);
+          box.classList.add("copied");
+          copyBtn.textContent = "copied";
         } catch {
-          const r2 = document.createRange();
-          r2.selectNodeContents(el.querySelector(".code"));
-          const s = window.getSelection();
-          s.removeAllRanges();
-          s.addRange(r2);
-          label.textContent = "select & ⌘C";
+          copyBtn.textContent = "select & ⌘C";
         }
         setTimeout(() => {
-          el.classList.remove("copied");
-          label.textContent = original;
+          box.classList.remove("copied");
+          copyBtn.textContent = original;
         }, 1400);
       });
     }
+
+    // --- live npm version in the header badge ----------------------------
+    (async () => {
+      const el = document.getElementById("npm-version");
+      if (!el) return;
+      try {
+        const r = await fetch("https://registry.npmjs.org/claudecompress/latest", { cache: "no-store" });
+        if (!r.ok) return;
+        const { version } = await r.json();
+        if (version) el.textContent = "v" + version;
+      } catch {
+        // offline / blocked — keep the hard-coded fallback
+      }
+    })();
 
     // --- section scroll-reveal -------------------------------------------
     if (!REDUCE_MOTION && "IntersectionObserver" in window) {

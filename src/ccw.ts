@@ -43,22 +43,31 @@ function readSignal(): string | null {
   }
 }
 
+function resolveClaudeCmd(): string {
+  const custom = process.env.CCW_CLAUDE_CMD?.trim();
+  return custom && custom.length > 0 ? custom : "claude";
+}
+
 function runClaude(args: string[]): Promise<number> {
+  const cmd = resolveClaudeCmd();
   return new Promise((resolve) => {
-    const child = spawn("claude", args, {
+    const child = spawn(cmd, args, {
       stdio: "inherit",
       env: {
         ...process.env,
         CCW_SIGNAL_FILE: SIGNAL_FILE,
         CCW_ACTIVE: "1",
       },
-      shell: process.platform === "win32",
+      shell: process.platform === "win32" || cmd !== "claude",
     });
     child.on("exit", (code) => resolve(code ?? 0));
     child.on("error", (err) => {
       process.stderr.write(
-        `[ccw] failed to spawn claude: ${err.message}\n` +
-          "      is the Claude Code CLI on your PATH?\n",
+        `[ccw] failed to spawn ${cmd}: ${err.message}\n` +
+          `      is ${cmd === "claude" ? "the Claude Code CLI" : `\`${cmd}\``} on your PATH?\n` +
+          (cmd === "claude"
+            ? "      (tip: set CCW_CLAUDE_CMD if you launch Claude Code via a wrapper or alias)\n"
+            : ""),
       );
       resolve(1);
     });

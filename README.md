@@ -36,11 +36,10 @@ States:
 
 Everything reads from the session JSONL Claude Code already writes. No proxy, no API interception.
 
-- **Cache mode.** `cache_creation.ephemeral_1h_input_tokens > 0` → 1h, else 5m.
-- **Agent working.** Latest assistant record with `stop_reason` in `{tool_use, pause_turn}` → mid-turn. Unknown reasons default to terminal.
-- **Idle countdown.** Terminal `stop_reason` (`end_turn`, `max_tokens`, `stop_sequence`, `refusal`) → counts down from that timestamp. Zero → cold.
-- **Client-side commands filtered.** `/context`, `/clear`, `/compact` write user records that never get a reply. Skipped so they don't lock the display into "working".
-- **Polling.** Claude Code ticks the statusLine every second (`refreshInterval: 1`). Parsed state cached at `~/.claude/claudecompress/statusline-cache-<sid>.json`, keyed on JSONL mtime+size. Idle ticks skip the parse.
+- **Cache mode.** 1h if `ephemeral_1h_input_tokens > 0`, else 5m.
+- **Active vs idle.** Working when an API call is in-flight or a tool was dispatched in the last 30 s. Idle (countdown) otherwise — including when blocked on a permission prompt, a TTY subprocess, or after a Ctrl-C interrupt.
+- **Interrupt detection.** Ctrl-C / ESC leaves a `[Request interrupted by user]` marker; the countdown starts from there.
+- **Polling.** Ticks every second via `refreshInterval: 1`. State cached at `~/.claude/claudecompress/statusline-cache-<sid>.json`, keyed on JSONL mtime+size.
 
 ## Trimming
 
@@ -110,6 +109,18 @@ Internals:
 - Flag preservation: strips prior `--resume`/`-r` and bare positional args on auto-resume, keeps the rest. Your `--dangerously-skip-permissions`, `--model`, etc. survive.
 
 Cross-platform (Windows, macOS, Linux). Requires the `claude` CLI on your PATH.
+
+**Using a wrapper or alias?** Shell aliases (`alias claude-me='CLAUDE_CONFIG_DIR=~/.claude_personal claude'`) don't survive into child processes, so `ccw` can't pick them up automatically. Two ways to compose:
+
+```bash
+# Env-var prefix works as-is — ccw inherits env and passes it through.
+CLAUDE_CONFIG_DIR=~/.claude_personal ccw
+
+# Or point ccw at a different launcher binary / script.
+CCW_CLAUDE_CMD=claude-me ccw
+```
+
+`CCW_CLAUDE_CMD` accepts any executable on your PATH (or an absolute path). Use it when your launcher isn't just `claude`.
 
 ## Modes
 
