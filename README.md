@@ -65,7 +65,7 @@ Hook output:
 ┌─ claudecompress ────────────────────────────────────────┐
   mode:   focus (last 5) · dropped thinking
   tokens: 761k → 217k       (saved ≈ 544k)
-  cold $ $11.41 → $3.25     (saved ≈ $8.16)  [Opus 4.7]
+  cost:   $22.83 → $6.51    (saved ≈ $16.32)  [Opus 4.6 · 200k+ tier]
   trimmed session: 17420d99-7152-4359-bfdd-34c2cefe77e3
 └─────────────────────────────────────────────────────────┘
   Exit this session (Ctrl+C), then run:
@@ -137,18 +137,18 @@ CCW_CLAUDE_CMD=claude-me ccw
 
 **Drop-thinking toggle** (any non-Ultra mode): cuts 200k+ tokens. Claude doesn't re-read prior thinking on resume; it's free savings.
 
-Real savings on a 761k-token Opus session (153 user turns). **Focus 5 is the recommended default**: keeps your last 5 exchanges verbatim, dialog-only trail for everything older, cuts cold-resume cost by ~70%.
+Real savings on a 761k-token Opus 4.6 session (153 user turns, 200k+ context tier). **Focus 5 is the recommended default**: keeps your last 5 exchanges verbatim, dialog-only trail for everything older, cuts cost by ~70%.
 
-| Mode | Tokens | Cold cost | Saved |
+| Mode | Tokens | Cost | Saved |
 |---|---|---|---|
-| None (baseline) | 761k | $11.41 | · |
-| Redact | 503k | $7.54 | $3.87 |
-| Recency 15 | 574k | $8.61 | $2.80 |
-| Focus 15 | 327k | $4.91 | $6.50 |
-| **Focus 5** (recommended) | **217k** | **$3.25** | **$8.16** |
-| Ultra | 125k | $1.88 | $9.53 |
+| Baseline | 761k | $22.83 | — |
+| Recency 15 | 574k | $17.22 | $5.61 |
+| Redact | 503k | $15.09 | $7.74 |
+| Focus 15 | 327k | $9.81 | $13.02 |
+| **Focus 5** (recommended) | **217k** | **$6.51** | **$16.32** |
+| Ultra | 125k | $1.88 | $20.95 |
 
-Cost estimates use each model's actual input rate (Opus 4.7/4.6, Sonnet 4.6, Haiku 4.5). Token count is a char-based approximation, within ~10% of Anthropic's tokenizer.
+Cost uses Opus 4.6's 200k+ input rate ($30/Mtok for the full context once it crosses the threshold, $15/Mtok otherwise — Ultra's 125k drops below the tier). Token counts are char-based approximations, within ~10% of Anthropic's tokenizer. Same table for Opus 4.7/Sonnet/Haiku uses each model's own rates.
 
 ## When to trim
 
