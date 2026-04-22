@@ -19,30 +19,71 @@ const HOOK_MATCHER = "^/compress";
 const HOOK_TAG = "claudecompress hook";
 const STATUSLINE_TAG = "claudecompress statusline";
 
-function hasGlobalBinary(): boolean {
+function commandExists(cmd: string): boolean {
   try {
     const which = process.platform === "win32" ? "where" : "which";
-    execSync(`${which} claudecompress`, { stdio: "ignore" });
+    execSync(`${which} ${cmd}`, { stdio: "ignore" });
     return true;
   } catch {
     return false;
   }
 }
 
+function hasGlobalBinary(): boolean {
+  return commandExists("claudecompress");
+}
+
+/**
+ * Find the installed JS entrypoint so we can invoke it via `bun <path>`.
+ * Falls back to null if we can't resolve — caller should use the plain
+ * `claudecompress` PATH binary in that case.
+ */
+function findSelfEntry(): string | null {
+  // argv[1] points at the script we were started with. When the user runs
+  // `claudecompress install` through a global npm/bun bin, node resolves the
+  // .cmd/symlink and argv[1] is the real dist/index.js path. That's exactly
+  // what we want to hand to `bun`.
+  //
+  // On Windows, Claude Code invokes statusLine commands via Git Bash (MSYS),
+  // which treats backslashes as escape characters — so `C:\Users\Keshav\...`
+  // gets mangled to `CUsersKeshav...` before bun ever sees it. Converting to
+  // forward slashes sidesteps this: bash passes `/` through unchanged, and
+  // Windows file APIs accept forward slashes everywhere.
+  const self = process.argv[1];
+  if (!self || !/\.(js|mjs|cjs|ts)$/.test(self)) return null;
+  return process.platform === "win32" ? self.replace(/\\/g, "/") : self;
+}
+
+function quoteArg(s: string): string {
+  // Windows paths commonly have spaces (Program Files…). Quote everywhere
+  // for safety — settings.json hook/command strings are parsed by a shell.
+  if (!/[\s"]/.test(s)) return s;
+  if (process.platform === "win32") return `"${s.replace(/"/g, '\\"')}"`;
+  return `"${s.replace(/(["\\$`])/g, "\\$1")}"`;
+}
+
 function detectHookCommand(): string {
+  // Hook fires once per /compress invocation — startup cost is irrelevant.
+  // Prefer the plain CLI when on PATH, else npx as a fallback.
   return hasGlobalBinary()
     ? "claudecompress hook"
     : "npx -y claudecompress hook";
 }
 
 /**
- * StatusLine is polled every refreshInterval seconds, so we require a global
- * install to avoid 500ms npm cold-start tanking every tick. If the binary
- * isn't on PATH, install skips the statusLine with a clear message pointing
- * at `bun add -g claudecompress`.
+ * StatusLine runs every refreshInterval seconds, so startup cost matters.
+ * Preference order (fastest → slowest):
+ *   1. `bun <self>.js statusline`           — ~10-15ms startup, preferred
+ *   2. `claudecompress statusline`          — ~30-50ms (node shebang), fine
+ *   null → not on PATH at all, skip install with guidance.
  */
-function detectStatuslineCommand(): string | null {
-  return hasGlobalBinary() ? "claudecompress statusline" : null;
+function detectStatuslineCommand(): { cmd: string; viaBun: boolean } | null {
+  if (!hasGlobalBinary()) return null;
+  const self = findSelfEntry();
+  if (self && commandExists("bun")) {
+    return { cmd: `bun ${quoteArg(self)} statusline`, viaBun: true };
+  }
+  return { cmd: "claudecompress statusline", viaBun: false };
 }
 
 function readSettings(): any {
@@ -153,18 +194,28 @@ async function planHook(settings: any): Promise<HookDecision | null> {
 const REFRESH_INTERVAL = 1;
 
 type StatusDecision =
-  | { kind: "install"; command: string; refreshInterval: number }
+  | {
+      kind: "install";
+      command: string;
+      refreshInterval: number;
+      viaBun: boolean;
+    }
   | { kind: "skip"; reason: string };
 
 async function planStatusline(settings: any): Promise<StatusDecision | null> {
-  const command = detectStatuslineCommand();
-  if (!command) {
+  const detected = detectStatuslineCommand();
+  if (!detected) {
     return {
       kind: "skip",
       reason:
         "cache timer needs a global install — run `bun add -g claudecompress` (or `npm i -g claudecompress`), then `claudecompress install-statusline`",
     };
   }
+  const { cmd: command, viaBun } = detected;
+  const hint = viaBun
+    ? pc.dim(`(bun, refresh every ${REFRESH_INTERVAL}s)`)
+    : pc.dim(`(refresh every ${REFRESH_INTERVAL}s — install bun for faster ticks)`);
+
   const existing = settings.statusLine;
   const existingIsOurs =
     typeof existing?.command === "string" &&
@@ -177,7 +228,7 @@ async function planStatusline(settings: any): Promise<StatusDecision | null> {
     });
     if (p.isCancel(refresh)) return null;
     return refresh
-      ? { kind: "install", command, refreshInterval: REFRESH_INTERVAL }
+      ? { kind: "install", command, viaBun, refreshInterval: REFRESH_INTERVAL }
       : { kind: "skip", reason: "kept existing claudecompress statusLine" };
   }
 
@@ -188,17 +239,17 @@ async function planStatusline(settings: any): Promise<StatusDecision | null> {
     });
     if (p.isCancel(overwrite)) return null;
     return overwrite
-      ? { kind: "install", command, refreshInterval: REFRESH_INTERVAL }
+      ? { kind: "install", command, viaBun, refreshInterval: REFRESH_INTERVAL }
       : { kind: "skip", reason: "kept your existing statusLine" };
   }
 
   const go = await p.confirm({
-    message: `Install the cache-timer statusLine?  ${pc.dim(`(refresh every ${REFRESH_INTERVAL}s)`)}`,
+    message: `Install the cache-timer statusLine?  ${hint}`,
     initialValue: true,
   });
   if (p.isCancel(go)) return null;
   return go
-    ? { kind: "install", command, refreshInterval: REFRESH_INTERVAL }
+    ? { kind: "install", command, viaBun, refreshInterval: REFRESH_INTERVAL }
     : { kind: "skip", reason: "skipped cache timer (run `claudecompress install-statusline` to add later)" };
 }
 
@@ -261,8 +312,15 @@ export async function install(): Promise<void> {
   }
   if (statusDecision.kind === "install") {
     p.log.success(
-      `Installed cache-timer statusLine · refresh every ${statusDecision.refreshInterval}s`,
+      `Installed cache-timer statusLine · ${statusDecision.viaBun ? "bun" : "node"} · refresh every ${statusDecision.refreshInterval}s`,
     );
+    if (!statusDecision.viaBun) {
+      p.log.info(
+        pc.dim(
+          "Tip: install bun (https://bun.sh) — faster startup makes the countdown feel smoother.",
+        ),
+      );
+    }
   } else {
     p.log.warn(statusDecision.reason);
   }
@@ -303,8 +361,15 @@ export async function installStatusline(): Promise<void> {
   const b = writeSettings(settings);
   if (b) p.log.info(`Backed up previous settings to ${b}`);
   p.log.success(
-    `Installed cache-timer statusLine · refresh every ${decision.refreshInterval}s`,
+    `Installed cache-timer statusLine · ${decision.viaBun ? "bun" : "node"} · refresh every ${decision.refreshInterval}s`,
   );
+  if (!decision.viaBun) {
+    p.log.info(
+      pc.dim(
+        "Tip: install bun (https://bun.sh) — faster startup makes the countdown feel smoother.",
+      ),
+    );
+  }
   p.log.info("Restart Claude Code to see it.");
   p.outro(pc.green("Done."));
 }
