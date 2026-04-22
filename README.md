@@ -2,11 +2,9 @@
 
 Three things for Claude Code, from one install:
 
-1. **Live cache-TTL status line** in Claude Code's UI — green/yellow/red countdown that tells you when the prompt cache will expire.
+1. **Live cache-TTL status line** in Claude Code's UI — countdown that tells you when the prompt cache will expire. Auto-detects 5-minute vs 1-hour ephemeral cache mode.
 2. **`/compress` slash command** — trim the active session on-demand without leaving Claude Code.
 3. **Interactive trimmer** (`bunx claudecompress`) — retrospective surgery on any saved JSONL, for cheaper cold `/resume`.
-
-All three work together: the timer tells you *when* to act, `/compress` acts, the trimmer handles offline surgery.
 
 ## Quick start
 
@@ -33,15 +31,13 @@ Rendered inside Claude Code's native status line. States:
 ◉ new session · cache not yet seeded              pre-first-response
 ```
 
-**How it works** (honestly, no magic):
+**How it works.** Everything comes from fields Claude Code already writes to the session JSONL — no proxy, no API interception.
 
-- **Source of truth:** `message.usage` fields on assistant records in the current session's JSONL. We read the tail (500KB window on files >2MB), walk back, find the latest assistant record with cache usage.
-- **Cache mode detection:** `cache_creation.ephemeral_1h_input_tokens > 0` → 1h mode, else 5m. Displayed as `1h` or `5m` in the line.
-- **"Agent working" state:** latest assistant record with `stop_reason` in `{tool_use, pause_turn}` → mid-turn. Unknown/missing stop_reasons default to terminal (safer failure mode).
-- **Idle/cold transitions:** terminal `stop_reason` (`end_turn`, `max_tokens`, `stop_sequence`, `refusal`) → countdown from that record's timestamp. Zero crossing → `cold`.
-- **Client-side commands filtered:** `/context`, `/clear`, `/compact` and similar write 3–4 user records to the JSONL (caveat headers, command-name wrappers, stdout capture). Those never await an assistant reply; we skip them when computing the user-vs-assistant delta.
-- **Per-session cache at `~/.claude/claudecompress/statusline-cache-<sid>.json`**, keyed on JSONL mtime + size. Idle ticks do one stat + tiny-file read; the JSONL is re-parsed only when it actually changes.
-- **Polling:** Claude Code invokes the statusLine every second via `refreshInterval: 1`. Zero daemons, zero background processes on our side.
+- **Cache mode.** `cache_creation.ephemeral_1h_input_tokens > 0` → 1h mode, else 5m. Displayed in the line.
+- **"Agent working" state.** Latest assistant record with `stop_reason` in `{tool_use, pause_turn}` → mid-turn. Unknown or missing stop_reasons default to terminal (safer failure mode).
+- **Idle countdown.** Terminal `stop_reason` (`end_turn`, `max_tokens`, `stop_sequence`, `refusal`) → counts down from that record's timestamp. Zero crossing → `cold`.
+- **Client-side commands filtered.** `/context`, `/clear`, `/compact` and friends write user records that never await a reply. Skipped so they don't lock the display into "working".
+- **Polling.** Claude Code invokes the statusLine every second via `refreshInterval: 1`. We cache parsed state at `~/.claude/claudecompress/statusline-cache-<sid>.json` keyed on JSONL mtime + size — idle ticks skip parsing entirely.
 
 ## `/compress` slash command
 
@@ -71,7 +67,7 @@ Hook output:
 
 The original session JSONL is never modified — a new file is written alongside it with a fresh UUID and a `[TRIMMED by claudecompress]` prefix on the first user message (so you can pick it out of the `/resume` list).
 
-**Honest limitation:** `/compress` can't rewrite the live session in place. Only `/compact` can, because it runs inside Claude Code's own process. You still exit and `--resume` the trimmed copy. See `ccw` below for auto-resume.
+`/compress` writes a trimmed sibling JSONL; it can't mutate the running session (only `/compact` can, since it's in-process). You Ctrl+C and `--resume` the new UUID — or use `ccw` below to auto-resume.
 
 ## `ccw` — auto-resume wrapper
 
@@ -121,7 +117,7 @@ Every trim is logged to `~/.claude/claudecompress/history.jsonl`. The interactiv
 | **Ultra** | heavy | user + assistant text only; tools/thinking all dropped |
 | **Truncate N** | manual | keep first N chars of every tool_result |
 
-**Drop-thinking toggle** on any non-Ultra mode: cuts 200k+ tokens of thinking blocks on long sessions. Not replayed meaningfully on resume.
+**Drop-thinking toggle** on any non-Ultra mode: cuts 200k+ tokens of thinking blocks. Claude doesn't re-read prior thinking on resume, so this is free savings.
 
 Real savings on a 760k-token Opus session:
 
@@ -134,7 +130,7 @@ Real savings on a 760k-token Opus session:
 | Focus 100 | 136k | $2.04 | $9.37 |
 | Ultra | 125k | $1.88 | $9.53 |
 
-Cost estimates use each model's actual input rate (Opus 4.7/4.6, Sonnet 4.6, Haiku 4.5). Token count is a char-based approximation — within ~10% of the real tokenizer.
+Cost estimates use each model's actual input rate (Opus 4.7/4.6, Sonnet 4.6, Haiku 4.5). Token count is a char-based approximation — within ~10% of Anthropic's tokenizer.
 
 ## When to trim
 
@@ -160,10 +156,13 @@ claudecompress uninstall            # remove everything we added, keep backup
 
 Existing custom `statusLine` entries are never overwritten without explicit confirmation. The installer asks before touching anything.
 
-### Runtime preferences
+### Why global install (and bun)
 
-- **Global install is required for the statusLine.** At 1 Hz polling, `npx`'s ~500 ms npm cold-start per tick would burn roughly 50% of a CPU. If `claudecompress` isn't on PATH, the installer skips the statusLine with clear guidance. The `/compress` hook still works fine under `npx` because it fires rarely.
-- **Bun is preferred over node.** Installer detects `bun` on PATH and writes `bun <dist>/index.js statusline` (~10–15 ms startup) instead of plain `claudecompress statusline` (~30–50 ms). Both work; bun just makes the countdown feel smoother.
+The statusLine polls once per second. Under `npx`, every tick would pay ~500 ms of npm cold-start — burn half a CPU for nothing. Global install keeps startup in the 10–50 ms range. If `claudecompress` isn't on PATH, the installer skips the statusLine with clear guidance.
+
+**Bun is preferred over node.** ~3× faster startup (~10–15 ms vs ~30–50 ms), so per-second ticks feel smoother. Installer detects `bun` on PATH and writes `bun <dist>/index.js statusline` automatically.
+
+The `/compress` hook works fine under `npx` — it fires once per user-typed `/compress`, not continuously.
 
 ## Architecture notes
 

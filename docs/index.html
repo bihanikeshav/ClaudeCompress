@@ -4,11 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>claudecompress — cache timer &amp; /compress for Claude Code</title>
-  <meta name="description" content="Three additions to Claude Code: a live cache-TTL status line, a /compress slash command, and an interactive trimmer for cheaper cold /resume." />
+  <meta name="description" content="A live cache-TTL status line, a /compress slash command, and a retrospective trimmer — all for Claude Code." />
   <meta name="color-scheme" content="dark" />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="claudecompress" />
-  <meta property="og:description" content="Three additions to Claude Code: cache timer, /compress, retrospective trimmer." />
+  <meta property="og:description" content="Cache timer, /compress, and a trimmer for Claude Code." />
   <meta property="og:url" content="https://bihanikeshav.github.io/ClaudeCompress/" />
   <meta name="twitter:card" content="summary" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -16,18 +16,19 @@
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,0..100;1,9..144,300..900,0..100&family=Instrument+Sans:wght@400..700&family=JetBrains+Mono:wght@400..600&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #0c0b0a;
+      --bg: #0b0a09;
       --bg-tint: #14120f;
-      --fg: #e8e4dc;
-      --fg-dim: #8f8a7e;
-      --fg-dimmer: #55514a;
+      --bg-raised: #181510;
+      --fg: #ebe6dc;
+      --fg-dim: #8d887c;
+      --fg-dimmer: #4f4a42;
       --accent: #e5a048;
       --accent-soft: #a87c40;
       --green: #8fa76c;
       --yellow: #d9a657;
       --red: #c5695e;
       --cyan: #7fb8b5;
-      --rule: #262218;
+      --rule: #221e17;
     }
     * { box-sizing: border-box; }
     html { scroll-behavior: smooth; }
@@ -37,44 +38,66 @@
       color: var(--fg);
       font-family: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
       font-size: 17px;
-      line-height: 1.6;
+      line-height: 1.55;
       -webkit-font-smoothing: antialiased;
       font-feature-settings: "kern", "liga", "ss01";
       text-rendering: optimizeLegibility;
     }
     ::selection { background: var(--accent); color: var(--bg); }
 
-    .wrap { max-width: 880px; margin: 0 auto; padding: 0 clamp(1.25rem, 4vw, 2.5rem); }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 clamp(1.25rem, 3.5vw, 3rem); }
 
-    h1, h2 { font-family: "Fraunces", "Times New Roman", serif; font-weight: 430; letter-spacing: -0.025em; line-height: 1.02; margin: 0; font-variation-settings: "opsz" 144, "SOFT" 30; }
-    h1 { font-size: clamp(2.75rem, 9.5vw, 5.75rem); }
-    h2 { font-size: clamp(1.75rem, 4.2vw, 2.6rem); font-weight: 480; line-height: 1.1; }
-    .serif-italic { font-family: "Fraunces", serif; font-style: italic; font-weight: 420; }
+    h1, h2 { font-family: "Fraunces", "Times New Roman", serif; font-weight: 430; letter-spacing: -0.028em; line-height: 1; margin: 0; font-variation-settings: "opsz" 144, "SOFT" 30; }
+    h1 { font-size: clamp(2.75rem, 7.5vw, 5.5rem); }
+    h2 { font-size: clamp(1.85rem, 3.8vw, 2.6rem); font-weight: 480; line-height: 1.08; }
+    .italic { font-family: "Fraunces", serif; font-style: italic; font-weight: 420; }
     .accent { color: var(--accent); }
-    code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-size: 0.94em; font-feature-settings: "calt", "liga"; }
-    p code { background: var(--bg-tint); border: 1px solid var(--rule); padding: 0.05em 0.36em; border-radius: 3px; font-size: 0.88em; }
+    code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, Menlo, monospace; font-feature-settings: "calt", "liga"; }
+    p code { background: var(--bg-tint); border: 1px solid var(--rule); padding: 0.05em 0.38em; border-radius: 3px; font-size: 0.86em; }
     pre { margin: 0; white-space: pre; }
 
     header { border-bottom: 1px solid var(--rule); padding: 1.1rem 0; font-family: "JetBrains Mono", monospace; font-size: 12.5px; color: var(--fg-dim); }
     header .wrap { display: flex; justify-content: space-between; align-items: center; }
-    header .brand { color: var(--fg); font-weight: 500; }
+    header .brand { color: var(--fg); font-weight: 500; letter-spacing: -0.01em; }
     header .brand .accent { color: var(--accent); }
+    header .meta { display: flex; gap: 0.9rem; align-items: center; }
     header a { color: var(--fg-dim); text-decoration: none; transition: color 150ms ease; }
     header a:hover { color: var(--accent); }
-    header .meta { display: flex; gap: 1rem; align-items: center; }
     .dot-sep { color: var(--fg-dimmer); }
 
-    section { padding: clamp(3rem, 8vw, 5.25rem) 0; border-top: 1px solid var(--rule); }
-    section.hero { border-top: none; padding-top: clamp(3.5rem, 11vw, 6.5rem); padding-bottom: clamp(2.5rem, 7vw, 4.5rem); }
+    section { padding: clamp(3rem, 7vw, 5rem) 0; border-top: 1px solid var(--rule); }
+    section.hero { border-top: none; padding-top: clamp(3rem, 8vw, 5.5rem); padding-bottom: clamp(3rem, 8vw, 5.5rem); }
 
-    .kicker { font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--fg-dimmer); letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 1.5rem; }
+    .kicker { font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--fg-dimmer); letter-spacing: 0.16em; text-transform: uppercase; margin-bottom: 1.25rem; }
 
-    .hero h1 { margin-bottom: 2.2rem; }
-    .hero .lede { max-width: 38ch; font-size: clamp(1.08rem, 1.8vw, 1.22rem); color: var(--fg); opacity: 0.92; line-height: 1.5; margin: 0 0 2.75rem; }
+    /* hero grid */
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: clamp(2.5rem, 6vw, 4.5rem);
+      align-items: center;
+    }
+    @media (min-width: 900px) {
+      .hero-grid { grid-template-columns: 1.05fr 1fr; }
+    }
+
+    .hero h1 { margin-bottom: 1.75rem; }
+    .hero .lede { max-width: 34ch; font-size: clamp(1.05rem, 1.5vw, 1.18rem); color: var(--fg); opacity: 0.86; margin: 0 0 2.25rem; }
     .hero .lede em { color: var(--accent); font-style: normal; font-weight: 500; }
 
-    .install { display: flex; flex-direction: column; gap: 0.55rem; max-width: 560px; }
-    .cmd { display: flex; align-items: center; gap: 0.85rem; background: var(--bg-tint); border: 1px solid var(--rule); border-radius: 4px; padding: 0.7rem 0.95rem; font-family: "JetBrains Mono", monospace; font-size: 13.5px; cursor: pointer; transition: border-color 150ms ease, background 150ms ease; user-select: none; }
+    .install { display: flex; flex-direction: column; gap: 0.55rem; max-width: 500px; }
+    .cmd {
+      display: flex; align-items: center; gap: 0.85rem;
+      background: var(--bg-tint);
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      padding: 0.7rem 0.95rem;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 13.5px;
+      cursor: pointer;
+      transition: border-color 150ms ease, background 150ms ease;
+      user-select: none;
+    }
     .cmd:hover { border-color: var(--accent-soft); }
     .cmd .prompt { color: var(--fg-dimmer); }
     .cmd .code { color: var(--fg); flex: 1; }
@@ -82,68 +105,103 @@
     .cmd:hover .copy { color: var(--accent); }
     .cmd.copied .copy { color: var(--green); }
 
-    .cta-row { display: flex; gap: 1.75rem; align-items: center; margin-top: 2.5rem; font-family: "JetBrains Mono", monospace; font-size: 13px; flex-wrap: wrap; }
+    .cta-row { display: flex; gap: 1.5rem; align-items: center; margin-top: 1.75rem; font-family: "JetBrains Mono", monospace; font-size: 12.5px; flex-wrap: wrap; }
     .cta-row a { color: var(--fg-dim); text-decoration: none; border-bottom: 1px solid transparent; padding-bottom: 2px; transition: color 150ms ease, border-color 150ms ease; }
     .cta-row a:hover { color: var(--accent); border-color: var(--accent); }
 
-    .sec-tag { font-family: "JetBrains Mono", monospace; font-size: 10.5px; color: var(--fg-dimmer); letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 1.4rem; display: flex; align-items: center; gap: 1rem; }
-    .sec-tag::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
-    section h2 { margin-bottom: 1.1rem; max-width: 22ch; }
-    .intro { max-width: 60ch; color: var(--fg); opacity: 0.85; line-height: 1.6; margin: 0 0 2rem; }
+    /* preview frame (right column of hero) */
+    .preview {
+      background: var(--bg-tint);
+      border: 1px solid var(--rule);
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 1px 0 rgba(232, 228, 220, 0.02) inset;
+    }
+    .preview-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--rule);
+      background: var(--bg-raised);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: var(--fg-dim);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .preview-head .tag { color: var(--fg-dimmer); }
+    .preview-body { padding: 1.1rem 1.25rem; font-family: "JetBrains Mono", monospace; font-size: 13.2px; line-height: 2.1; }
+    .state-line { display: flex; align-items: baseline; gap: 0; flex-wrap: wrap; }
+    .state-line .dot { margin-right: 0.55rem; }
+    .state-line .sep { color: var(--fg-dimmer); padding: 0 0.45rem; }
+    .state-line .faint { color: var(--fg-dim); }
+    .state-line .note { margin-left: auto; padding-left: 1.5rem; color: var(--fg-dimmer); font-style: italic; font-family: "Fraunces", serif; font-size: 12.5px; white-space: nowrap; font-variation-settings: "opsz" 14; }
+    .state-line.warm .dot, .state-line.warm .label { color: var(--green); }
+    .state-line.low .dot, .state-line.low .label { color: var(--yellow); }
+    .state-line.cold .dot, .state-line.cold .label { color: var(--red); }
+    .state-line.cold .action { color: var(--accent); }
+    .state-line.active .dot, .state-line.active .label { color: var(--cyan); }
 
-    .terminal, .box, .codeblock {
+    /* sections */
+    .sec-tag { font-family: "JetBrains Mono", monospace; font-size: 10.5px; color: var(--fg-dimmer); letter-spacing: 0.2em; text-transform: uppercase; margin-bottom: 1.3rem; display: flex; align-items: center; gap: 1rem; }
+    .sec-tag::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+    section h2 { margin-bottom: 0.9rem; max-width: 22ch; }
+    .intro { max-width: 56ch; color: var(--fg); opacity: 0.82; margin: 0 0 2rem; line-height: 1.55; }
+
+    /* two-column layout for section content */
+    .split { display: grid; grid-template-columns: 1fr; gap: clamp(1.5rem, 4vw, 3rem); align-items: start; }
+    @media (min-width: 860px) {
+      .split { grid-template-columns: 0.9fr 1.1fr; gap: 3rem; align-items: center; }
+    }
+
+    /* /compress box */
+    .box {
       background: var(--bg-tint);
       border: 1px solid var(--rule);
       border-radius: 5px;
-      padding: 1.3rem 1.5rem;
+      padding: 1.2rem 1.5rem;
       font-family: "JetBrains Mono", monospace;
-      font-size: 13.2px;
+      font-size: 13px;
       line-height: 1.85;
       overflow-x: auto;
     }
-    .terminal .row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 0; }
-    .terminal .dot { margin-right: 0.55rem; }
-    .terminal .sep { color: var(--fg-dimmer); padding: 0 0.45rem; }
-    .terminal .faint { color: var(--fg-dim); }
-    .terminal .warm .dot, .terminal .warm .state { color: var(--green); }
-    .terminal .low .dot, .terminal .low .state { color: var(--yellow); }
-    .terminal .cold .dot, .terminal .cold .state, .terminal .cold .action { color: var(--red); }
-    .terminal .active .dot, .terminal .active .state { color: var(--cyan); }
-    .terminal .cold .action { color: var(--accent); }
-    .terminal .note { margin-left: auto; padding-left: 1.5rem; color: var(--fg-dimmer); font-style: italic; font-family: "Fraunces", serif; font-size: 12.5px; white-space: nowrap; }
-
     .box .dim { color: var(--fg-dim); }
     .box .accent { color: var(--accent); }
     .box .savings { color: var(--green); }
 
+    .codeblock {
+      background: var(--bg-tint);
+      border: 1px solid var(--rule);
+      border-radius: 5px;
+      padding: 1.2rem 1.4rem;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 13px;
+      line-height: 1.9;
+      overflow-x: auto;
+      max-width: 640px;
+    }
     .codeblock .comment { color: var(--fg-dimmer); }
     .codeblock .prompt { color: var(--fg-dimmer); }
-    .codeblock .accent { color: var(--accent); }
 
+    /* table */
     table { width: 100%; border-collapse: collapse; font-family: "JetBrains Mono", monospace; font-size: 13.5px; }
-    table th { text-align: left; padding: 0.7rem 0.9rem; color: var(--fg-dim); font-weight: 400; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; border-bottom: 1px solid var(--rule); }
+    table th { text-align: left; padding: 0.65rem 0.9rem; color: var(--fg-dim); font-weight: 400; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; border-bottom: 1px solid var(--rule); }
     table th:nth-child(n+2), table td:nth-child(n+2) { text-align: right; }
-    table td { padding: 0.8rem 0.9rem; border-bottom: 1px solid var(--rule); color: var(--fg); }
+    table td { padding: 0.85rem 0.9rem; border-bottom: 1px solid var(--rule); color: var(--fg); }
     table tr:last-child td { border-bottom: none; }
     table tr.baseline td { color: var(--fg-dim); }
     table td.saved { color: var(--green); font-weight: 500; }
-    table tr.pick td { background: linear-gradient(90deg, rgba(229,160,72,0.06), rgba(229,160,72,0)); }
+    table tr.pick td { background: linear-gradient(90deg, rgba(229,160,72,0.07), rgba(229,160,72,0)); }
     table tr.pick td.mode { color: var(--accent); }
-    table tr.pick td.mode::before { content: "▸ "; color: var(--accent); }
 
-    .install-block .codeblock { max-width: 640px; }
-
-    .aside { margin-top: 1.75rem; max-width: 60ch; color: var(--fg-dim); font-size: 15px; line-height: 1.55; }
-    .aside code { color: var(--fg); }
-
-    footer { padding: 2.5rem 0 3rem; border-top: 1px solid var(--rule); font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--fg-dimmer); }
+    footer { padding: 2.25rem 0 2.75rem; border-top: 1px solid var(--rule); font-family: "JetBrains Mono", monospace; font-size: 11.5px; color: var(--fg-dimmer); }
     footer .wrap { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.75rem; }
     footer a { color: var(--fg-dim); text-decoration: none; transition: color 150ms ease; }
     footer a:hover { color: var(--accent); }
 
     @media (max-width: 620px) {
-      .terminal .note { margin-left: 0; padding-left: 0; width: 100%; margin-top: 0.15rem; }
-      .terminal .row { flex-direction: column; align-items: flex-start; }
+      .state-line .note { margin-left: 0; padding-left: 0; width: 100%; margin-top: 0.1rem; font-size: 11.5px; }
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
@@ -158,100 +216,103 @@
         <span>v0.6.4</span>
         <span class="dot-sep">·</span>
         <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
+        <span class="dot-sep">·</span>
+        <a href="https://www.npmjs.com/package/claudecompress">npm</a>
       </span>
     </div>
   </header>
 
   <main class="wrap">
     <section class="hero">
-      <div class="kicker">for Claude Code · 2026</div>
-      <h1>
-        Three things<br />
-        Claude Code<br />
-        <span class="serif-italic accent">forgot</span> to ship.
-      </h1>
-      <p class="lede">A live <em>cache-TTL timer</em> inside the UI. A <em>/compress</em> slash command that trims on demand. And a retrospective trimmer for sessions that got too big to resume cheaply.</p>
+      <div class="hero-grid">
+        <div>
+          <div class="kicker">for Claude Code</div>
+          <h1>
+            Three things<br />
+            Claude Code<br />
+            is <span class="italic accent">missing</span>.
+          </h1>
+          <p class="lede">A <em>cache-TTL countdown</em> inside the status line, a <em>/compress</em> slash command for mid-session trimming, and an offline trimmer that makes cold <code>/resume</code> cheap again.</p>
 
-      <div class="install">
-        <div class="cmd" data-copy="bun add -g claudecompress">
-          <span class="prompt">$</span>
-          <span class="code">bun add -g claudecompress</span>
-          <span class="copy">copy</span>
-        </div>
-        <div class="cmd" data-copy="claudecompress install">
-          <span class="prompt">$</span>
-          <span class="code">claudecompress install</span>
-          <span class="copy">copy</span>
-        </div>
-      </div>
+          <div class="install">
+            <div class="cmd" data-copy="bun add -g claudecompress">
+              <span class="prompt">$</span><span class="code">bun add -g claudecompress</span><span class="copy">copy</span>
+            </div>
+            <div class="cmd" data-copy="claudecompress install">
+              <span class="prompt">$</span><span class="code">claudecompress install</span><span class="copy">copy</span>
+            </div>
+          </div>
 
-      <div class="cta-row">
-        <a href="#install">quick start ↓</a>
-        <a href="https://github.com/bihanikeshav/ClaudeCompress">github →</a>
-        <a href="https://www.npmjs.com/package/claudecompress">npm →</a>
+          <div class="cta-row">
+            <a href="#savings">see savings ↓</a>
+            <a href="https://github.com/bihanikeshav/ClaudeCompress">github →</a>
+          </div>
+        </div>
+
+        <aside class="preview" aria-label="Cache status line preview">
+          <div class="preview-head">
+            <span>status line</span>
+            <span class="tag">inside claude code</span>
+          </div>
+          <div class="preview-body">
+            <div class="state-line warm">
+              <span><span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span>4:32 left<span class="sep">·</span><span class="faint">Opus 4.7</span></span>
+              <span class="note">plenty of TTL</span>
+            </div>
+            <div class="state-line low">
+              <span><span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span>0:58 left<span class="sep">·</span><span class="faint">Opus 4.7</span></span>
+              <span class="note">running low</span>
+            </div>
+            <div class="state-line cold">
+              <span><span class="dot">○</span><span class="label">cache cold</span><span class="sep">·</span>12m past<span class="sep">·</span><span class="action">/compress recommended</span></span>
+              <span class="note">trim now</span>
+            </div>
+            <div class="state-line active">
+              <span><span class="dot">◉</span><span class="label">cache active</span><span class="sep">·</span>agent working<span class="sep">·</span><span class="faint">Opus 4.7</span></span>
+              <span class="note">mid-turn</span>
+            </div>
+          </div>
+        </aside>
       </div>
     </section>
 
     <section>
-      <div class="sec-tag">§ 01 — the cache timer</div>
-      <h2>Know when to act.</h2>
-      <p class="intro">A line inside Claude Code's native status area that tells you exactly where your prompt cache stands. Reads the session JSONL, computes state from <code>message.usage</code> fields, renders one authoritative line every second.</p>
-
-      <div class="terminal">
-        <div class="row warm">
-          <span><span class="dot">◉</span><span class="state">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span>4:32 left<span class="sep">·</span><span class="faint">Opus 4.7</span></span>
-          <span class="note">plenty of TTL</span>
+      <div class="sec-tag">§ 01 — /compress</div>
+      <div class="split">
+        <div>
+          <h2>Trim <span class="italic">without</span> leaving.</h2>
+          <p class="intro">Type <code>/compress</code> in any session. The hook writes a trimmed sibling with a fresh UUID, prints what you saved, and tells you what to resume. Six modes from surgical to nuclear. Original JSONL untouched.</p>
+          <p class="intro" style="margin-top:-1rem;font-size:15px;color:var(--fg-dim)">For seamless exits, <code>ccw</code> wraps <code>claude</code> and auto-resumes into the trimmed session on <code>Ctrl+C</code>.</p>
         </div>
-        <div class="row low">
-          <span><span class="dot">◉</span><span class="state">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span>0:58 left<span class="sep">·</span><span class="faint">Opus 4.7</span></span>
-          <span class="note">under 25% — running low</span>
-        </div>
-        <div class="row cold">
-          <span><span class="dot">○</span><span class="state">cache cold</span><span class="sep">·</span>12m past<span class="sep">·</span><span class="action">/compress recommended</span></span>
-          <span class="note">time to trim</span>
-        </div>
-        <div class="row active">
-          <span><span class="dot">◉</span><span class="state">cache active</span><span class="sep">·</span>agent working<span class="sep">·</span><span class="faint">Opus 4.7</span></span>
-          <span class="note">mid-turn (tool_use)</span>
-        </div>
-      </div>
-
-      <p class="aside">Derived from fields Claude Code already writes — no proxying, no wire-level interception. Per-session mtime cache so idle ticks skip the JSONL parse entirely. Client-side commands like <code>/context</code> and <code>/clear</code> are filtered so they don't lock the display into &ldquo;working&rdquo;.</p>
-    </section>
-
-    <section>
-      <div class="sec-tag">§ 02 — /compress</div>
-      <h2>Trim without leaving.</h2>
-      <p class="intro">A slash command wired through <code>UserPromptSubmit</code>. Type <code>/compress</code> and the active session's JSONL gets a trimmed sibling with a fresh UUID. Six modes — <code>Redact</code>, <code>Recency N</code>, <code>Focus N</code>, <code>Smart</code>, <code>Ultra</code>, <code>Truncate N</code>. Original file untouched.</p>
-
-      <div class="box">
-<span class="dim">┌─ claudecompress ────────────────────────────────────────┐</span>
+        <div class="box">
+<span class="dim">┌─ claudecompress ────────────────────────────────┐</span>
   mode:   focus (last 20) <span class="dim">· dropped thinking</span>
   tokens: 628.8k <span class="accent">→</span> 126.0k   <span class="savings">(saved ≈ 502.8k)</span>
-  cold $ $9.43 <span class="accent">→</span> $1.89     <span class="savings">(saved ≈ $7.54)</span>  <span class="dim">[Opus 4.7]</span>
-  trimmed: 17420d99-7152-4359-bfdd-34c2cefe77e3
-<span class="dim">└─────────────────────────────────────────────────────────┘</span>
+  cold $ $9.43 <span class="accent">→</span> $1.89     <span class="savings">(saved ≈ $7.54)</span>
+  trimmed: 17420d99-7152-4359-bfdd…
+<span class="dim">└────────────────────────────────────────────────┘</span>
   <span class="dim">Ctrl+C, then:</span>  claude --resume 17420d99…</div>
-
-      <p class="aside">Want it seamless? <code>ccw</code> wraps <code>claude</code> and auto-resumes into the trimmed session when you Ctrl+C — flags like <code>--dangerously-skip-permissions</code> preserved across the relaunch.</p>
+      </div>
     </section>
 
     <section>
-      <div class="sec-tag">§ 03 — the retrospective trimmer</div>
-      <h2>One command, any session.</h2>
-      <p class="intro">For sessions you didn't trim in the moment — the interactive picker lists every project, flags cache staleness, shows estimated cold-<code>/resume</code> cost, writes a new JSONL alongside the old one.</p>
-
-      <div class="codeblock"><span class="prompt">$</span> bunx claudecompress
-  <span class="comment"># auto-detects the current project</span>
-  <span class="comment"># shows each session's size, staleness, cost estimate</span>
-  <span class="comment"># pick a mode, confirm — done</span></div>
+      <div class="sec-tag">§ 02 — offline trimmer</div>
+      <div class="split">
+        <div>
+          <h2>One command,<br /><span class="italic">any</span> session.</h2>
+          <p class="intro">For sessions you didn't trim in the moment. The picker auto-detects your project, flags cache staleness, shows cost per-session, writes a new JSONL alongside the old.</p>
+        </div>
+        <div class="codeblock"><span class="prompt">$</span> bunx claudecompress
+  <span class="comment"># lists your sessions, staleness, cost</span>
+  <span class="comment"># pick a mode, confirm</span>
+  <span class="comment"># new trimmed JSONL written alongside</span></div>
+      </div>
     </section>
 
-    <section>
-      <div class="sec-tag">§ 04 — real savings</div>
-      <h2>One Opus session, six modes.</h2>
-      <p class="intro">760k tokens, stale for six hours. Cost estimates use each model's actual input rate (Opus 4.7, 4.6, Sonnet 4.6, Haiku 4.5). Tool-heavy sessions save more.</p>
-
+    <section id="savings">
+      <div class="sec-tag">§ 03 — savings</div>
+      <h2>A 760k Opus session, six modes.</h2>
+      <p class="intro">Real numbers. Focus 500 is the sweet spot for "I want to keep working" — the last 500 turns verbatim, a dialog trail for everything before. Ultra is the nuclear option.</p>
       <table>
         <thead>
           <tr><th>Mode</th><th>Tokens</th><th>Cold cost</th><th>Saved</th></tr>
@@ -267,29 +328,27 @@
       </table>
     </section>
 
-    <section id="install" class="install-block">
-      <div class="sec-tag">§ 05 — install</div>
-      <h2>Two commands, one restart.</h2>
-      <p class="intro">Global install is required for the status line — <code>refreshInterval: 1</code> polling needs fast startup, and <code>npx</code>'s cold-start would eat CPU. Bun is preferred over node (~3× faster startup → smoother ticking). The <code>/compress</code> hook itself is fine via <code>npx</code>.</p>
+    <section id="install">
+      <div class="sec-tag">§ 04 — install</div>
+      <div class="split">
+        <div>
+          <h2>Install. <span class="italic">Restart.</span><br />Done.</h2>
+          <p class="intro">Global install required — the status line ticks once per second and needs fast startup. Bun is preferred; node works fine. Installer backs up your <code>settings.json</code> and never overwrites anything without asking.</p>
+        </div>
+        <div class="codeblock"><span class="prompt">$</span> bun add -g claudecompress
+<span class="comment"># or: npm i -g claudecompress</span>
 
-      <div class="codeblock"><span class="comment"># preferred</span>
-<span class="prompt">$</span> bun add -g claudecompress
-
-<span class="comment"># or</span>
-<span class="prompt">$</span> npm i -g claudecompress
-
-<span class="comment"># wire up hook + status line in ~/.claude/settings.json</span>
 <span class="prompt">$</span> claudecompress install
+<span class="comment"># pick: hook, status line, or both</span>
 
-<span class="comment"># fully quit and relaunch Claude Code. done.</span></div>
-
-      <p class="aside">The installer backs up your previous settings to <code>settings.json.claudecompress.bak</code> and asks before touching anything. Existing custom <code>statusLine</code> entries are never overwritten without explicit confirm. Subcommands — <code>install-hook</code>, <code>install-statusline</code>, <code>history</code>, <code>uninstall</code> — for surgical edits later.</p>
+<span class="comment"># fully quit &amp; relaunch Claude Code. done.</span></div>
+      </div>
     </section>
   </main>
 
   <footer>
     <div class="wrap">
-      <span>claudecompress · MIT · built for Claude Code</span>
+      <span>MIT license</span>
       <span>
         <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
         <span class="dot-sep">·</span>
