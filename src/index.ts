@@ -214,7 +214,7 @@ async function pickMode(
 
   const mode = await p.select({
     message: "How aggressive?",
-    initialValue: "redact",
+    initialValue: "focus",
     options: [
       {
         value: "redact",

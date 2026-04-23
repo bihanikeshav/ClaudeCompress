@@ -4,12 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>claudecompress · cache timer + trimmer for Claude Code</title>
-  <meta name="description" content="A live cache-TTL countdown in your status line, and a trimmer that keeps cold /resume cheap. For Claude Code." />
+  <meta name="description" content="A cache-aware status line and a trimmer that keeps cold /resume cheap. For Claude Code." />
   <meta name="color-scheme" content="dark" />
   <meta name="theme-color" content="#0f0d0a" />
   <meta property="og:type" content="website" />
   <meta property="og:title" content="claudecompress" />
-  <meta property="og:description" content="A cache-TTL countdown in your status line, and a trimmer that keeps cold /resume cheap." />
+  <meta property="og:description" content="A cache-aware status line and a trimmer that keeps cold /resume cheap. For Claude Code." />
   <meta property="og:url" content="https://bihanikeshav.github.io/ClaudeCompress/" />
   <meta property="og:image" content="https://bihanikeshav.github.io/ClaudeCompress/claude-code.png" />
   <meta property="og:image:alt" content="CLAUDE CODE — claudecompress cache timer + trimmer" />
@@ -976,7 +976,7 @@
             <h1>is <span class="italic">missing</span> two things.</h1>
 
             <ul class="lede-list">
-              <li>A live <em>cache-TTL countdown</em> in your status line.</li>
+              <li>A <em>cache-aware status line</em> so you know when your next message is expensive.</li>
               <li>A <em>trimmer</em> to make <code>/resume</code> actually usable.</li>
             </ul>
 
@@ -1034,7 +1034,7 @@
                 <span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span><span id="hero-countdown-low">0:58</span> left<span class="sep">·</span><span class="faint">Opus 4.7</span>
               </div>
               <div class="state-line cold">
-                <span class="dot">◉</span><span class="label">cache cold</span><span class="sep">·</span>12m past<span class="sep">·</span>use <span class="chip">/compress</span>
+                <span class="dot">◉</span><span class="label">cache cold</span><span class="sep">·</span>12m past<span class="sep">·</span><span class="chip">/compress</span> to trim before rebuild
               </div>
             </div>
           </aside>
@@ -1054,14 +1054,14 @@
         <div class="split">
           <div>
             <h2>Trim <span class="italic">without</span> losing the thread.</h2>
-            <p class="intro">Drops old tool outputs, thinking tokens, and file reads. That's the bloat that stacks up in context but isn't needed to resume. Your conversation thread stays intact.</p>
-            <p class="intro">Six modes, from <code>Redact</code> (safe default) to <code>Ultra</code> (most aggressive).</p>
+            <p class="intro"><code>Focus 5</code> (the default) keeps your last 5 exchanges verbatim: tool outputs, thinking, everything. Only older turns are compressed to a dialog-only trail. Claude remembers recent state; anything further back can be re-read from disk if needed.</p>
+            <p class="intro">Five other modes from <code>Redact</code> (structure-preserving) to <code>Ultra</code> (conversation thread only).</p>
             <p class="intro">Use <code>ccw</code>, the <code>claudecompress</code> wrapper, for a seamless resume. Or run <code>bunx claudecompress</code> as a standalone script.</p>
           </div>
           <div>
             <div class="demo-label">Inside a session</div>
             <div class="box"><span class="dim">┌─ claudecompress ───────────────────────┐</span>
-  mode:   focus (last 5) <span class="dim">· dropped thinking</span>
+  mode:   focus 5 (default) <span class="dim">· dropped thinking</span>
   tokens: 761k <span class="accent">→</span> 217k    <span class="savings">(saved ≈ 544k)</span>
   cost:   $22.83 <span class="accent">→</span> $6.51  <span class="savings">(saved ≈ $16.32)</span>
   trimmed: 17420d99-7152-4359-bfdd…
@@ -1082,7 +1082,7 @@
       <div class="wrap">
         <div class="sec-tag"><span>Savings</span></div>
         <h2>Up to 12× cheaper cold rebuilds.</h2>
-        <p class="intro intro-wide">A real 761k session, 153 user turns. <code>Focus 5</code> (recommended) keeps your last 5 exchanges verbatim and compresses older turns to a dialog-only trail, cutting cost by ~70%. <code>Ultra</code> goes further: up to 12× cheaper, keeping only the conversation thread.</p>
+        <p class="intro intro-wide">Measured on a real 761k session (153 user turns, Opus 4.6 at the 200k+ input tier). <code>Focus 5</code> keeps your last 5 exchanges verbatim: tools, thinking, file contents. Older turns become a dialog trail. Claude can re-read any file it needs; the conversation flow is intact. Run <code>bunx claudecompress</code> on your own sessions to verify.</p>
         <div class="table-wrap">
           <table>
             <thead>

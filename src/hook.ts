@@ -47,12 +47,12 @@ function parseCompressArgs(prompt: string): TrimOptions | null {
   const m = prompt.trim().match(/^\/compress\b\s*(.*)$/);
   if (!m) return null;
   const tokens = (m[1] ?? "").trim().split(/\s+/).filter(Boolean);
-  const modeTok = (tokens[0] ?? "redact") as TrimMode;
-  const mode: TrimMode = VALID_MODES.includes(modeTok) ? modeTok : "redact";
+  const modeTok = (tokens[0] ?? "focus") as TrimMode;
+  const mode: TrimMode = VALID_MODES.includes(modeTok) ? modeTok : "focus";
   const opts: TrimOptions = { mode };
   if (mode === "truncate") opts.keepChars = Number(tokens[1]) || 400;
   if (mode === "recency" || mode === "focus")
-    opts.keepLastN = Number(tokens[1]) || 15;
+    opts.keepLastN = Number(tokens[1]) || 5;
   if (mode !== "ultra") opts.dropThinking = true;
   return opts;
 }

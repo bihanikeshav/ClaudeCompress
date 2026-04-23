@@ -1,10 +1,10 @@
 # claudecompress
 
-A live **cache-TTL countdown** in your Claude Code status line, and a **trimmer** that keeps cold `/resume` cheap.
+A **cache-aware status line** for Claude Code, and a **trimmer** that keeps cold `/resume` cheap.
 
 Two things, one install:
 
-1. **Cache-TTL status line.** Countdown until your prompt cache expires. Detects 5m vs 1h ephemeral mode.
+1. **Cache-aware workflow signal.** Know when your next message is expensive before you send it. Countdown until your prompt cache expires; bundle follow-up now or pay cold tax. Detects 5m vs 1h ephemeral mode.
 2. **Trim any session.** Same engine, two entry points: `/compress` inside a Claude Code session trims it on demand, or `bunx claudecompress` trims any saved session retrospectively.
 
 ## Quick start
@@ -27,7 +27,7 @@ States:
 ```
 ◉ cache warm · 5m · 4:32 left · Opus 4.7
 ◉ cache warm · 5m · 0:58 left · Opus 4.7
-○ cache cold · 12m past · use /compress
+○ cache cold · 12m past · /compress to trim before rebuild
 ◉ cache active · agent working · Opus 4.7
 ◉ new session · cache not yet seeded
 ```
@@ -50,8 +50,7 @@ Two entry points into the same trim engine.
 Type `/compress` in any session. The hook trims the active session's JSONL and prints a resume command.
 
 ```
-/compress               # Redact (default) + drop thinking
-/compress focus 5       # recommended: dialog trail + last 5 exchanges verbatim
+/compress               # Focus 5 (default) + drop thinking
 /compress focus 15      # keep more recent context
 /compress recency 10    # last 10 user turns verbatim, redact older
 /compress smart         # per-tool rules
@@ -126,9 +125,9 @@ CCW_CLAUDE_CMD=claude-me ccw
 
 | Mode | Weight | Behavior |
 |---|---|---|
-| **Redact** (default) | medium | drop all tool_result bodies, keep full structure |
+| **Redact** | medium | drop all tool_result bodies, keep full structure |
 | **Recency N** | medium | keep last N user turns verbatim (with their tool chains), redact older |
-| **Focus N** | medium to heavy | dialog-only trail for older turns + last N user turns verbatim |
+| **Focus N** (default, N=5) | medium to heavy | dialog-only trail for older turns + last N user turns verbatim |
 | **Smart** | light | per-tool rules: Read heads/tails, Bash errors, full Edit/TodoWrite, redact WebFetch and heavy MCP responses |
 | **Ultra** | heavy | user + assistant text only; tools/thinking all dropped |
 | **Truncate N** | manual | keep first N chars of every tool_result |
@@ -137,7 +136,7 @@ CCW_CLAUDE_CMD=claude-me ccw
 
 **Drop-thinking toggle** (any non-Ultra mode): cuts 200k+ tokens. Claude doesn't re-read prior thinking on resume; it's free savings.
 
-Real savings on a 761k-token Opus 4.6 session (153 user turns, 200k+ context tier). **Focus 5 is the recommended default**: keeps your last 5 exchanges verbatim, dialog-only trail for everything older, cuts cost by ~70%.
+Real savings on a 761k-token Opus 4.6 session (153 user turns, 200k+ context tier). **Focus 5 is the default**: keeps your last 5 exchanges verbatim (tool outputs, thinking, everything), dialog-only trail for everything older. Claude can re-read any file it needs from disk; the conversation flow stays intact. Cuts cost by ~70%.
 
 | Mode | Tokens | Cost | Saved |
 |---|---|---|---|
