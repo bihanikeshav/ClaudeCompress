@@ -63,9 +63,9 @@ Hook output:
 
 ```
 ┌─ claudecompress ────────────────────────────────────────┐
-  mode:   safe (last 5) · drop thinking (outside last-N) · squash
-  tokens: 761k → 502k      (saved ≈ 259k)
-  cost:   $7.61 → $5.02    (saved ≈ $2.59)   [Opus 4.6 · 1h cache cold rebuild]
+  mode:   safe (last 5) · drop thinking · squash (outputs+inputs)
+  tokens: 761k → 337k      (saved ≈ 424k)
+  cost:   $7.61 → $3.37    (saved ≈ $4.24)   [Opus 4.6 · 1h cache cold rebuild]
   trimmed session: 17420d99-7152-4359-bfdd-34c2cefe77e3
 └─────────────────────────────────────────────────────────┘
   Exit this session (Ctrl+C), then run:
@@ -160,12 +160,18 @@ Four modes, measured on a 761k-token Opus 4.6 session (153 user turns):
 | Mode | % saved | $ saved | Quality risk | What it does |
 |---|---|---|---|---|
 | **lossless** | 17.7% | $1.35 | None | squash verbose tool outputs; preserves every turn, no structure changes |
-| ⭐ **safe** (default, N=5) | 34.0% | $2.59 | Low | keep last N turns verbatim; observation-mask older (JetBrains-validated) |
-| **smart** | 45.3% | $3.44 | Low-Med | per-component rules by turn depth; tool_use skeleton survives always |
+| ⭐ **safe** (default, N=5) | 55.7% | $4.24 | Low | keep last N turns verbatim; observation-mask older + compress Edit/Write diffs |
+| **smart** | 66.9% | $5.09 | Low-Med | per-component rules by turn depth; tool_use skeleton survives always |
 | **slim** (N=5) | 72.8% | $5.54 | Med | keep last N; older turns become dialog-only trail (loses breadcrumbs) |
 | **archive** | 83.5% | $6.35 | High | historical only — drops everything structural, user+assistant text only |
 
-All modes (including lossless) apply **squash**: rtk-style per-tool-call compression that rewrites verbose tool outputs to their signal. `git push` → `<hash>..<hash> branch -> branch`. `npm install` → `added N packages`. Error lines are preserved even in compressed output. Screenshots keep the text description, drop the base64 image (saves ~70KB per screenshot). The token-cost numbers above are conservative — they don't count base64 image savings from vision tokens, which are stripped too.
+**Squash** is applied in every mode. Two layers:
+
+1. **Tool output compression** (rtk-style, also in lossless). Per-command rewriters for `git push`, `npm install`, `cargo test`, `tsc`, `pytest`, `docker`, `kubectl`, and more. Universal head/tail with error-line preservation as fallback. Screenshots drop base64 image, keep description. Saves ~18% alone on lossless.
+
+2. **Tool input compression** (safe/smart, only for older turns). Edit's `old_string`/`new_string`, Write's `content`, MultiEdit's per-edit strings, Agent's `prompt` — truncated when the record is outside the last-N window. These inputs are 46% of session tokens on a typical Edit-heavy coding session. The model can re-Read the current file state if it needs detail on old diffs; retaining 10KB of old_string from 20 turns ago is near-zero value.
+
+Cost numbers are conservative — they don't count base64 image savings from vision tokens (stripped but not in our char-based estimator).
 
 **Why `safe` is the default.** JetBrains' 2025 NeurIPS study ("The Complexity Trap") tested **observation masking** — keeping tool call names and arguments but dropping old tool_result bodies — on 500 SWE-bench Verified tasks. It matched or beat LLM summarization on 4/5 model configs at 52% lower cost. `safe` implements exactly that pattern.
 

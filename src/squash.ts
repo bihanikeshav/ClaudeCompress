@@ -243,6 +243,80 @@ export function squashToolResultContent(
 }
 
 /**
+ * Compress a `tool_use` block's input for tools that carry large payloads
+ * in their arguments. Edit's old_string/new_string, Write's content, and
+ * MultiEdit's per-edit strings are the big ones. The model can re-read
+ * the current file state if needed — old diffs from 20 turns back are
+ * rarely load-bearing.
+ *
+ * Only applied to records OUTSIDE the recent window (see trimmer.ts).
+ */
+const INPUT_STR_MAX = 300;
+const INPUT_WRITE_CONTENT_MAX = 500;
+
+function truncateArg(s: string, max: number): string {
+  if (typeof s !== "string" || s.length <= max) return s;
+  return s.slice(0, max);
+}
+
+export function squashToolUseInput(blk: any, toolName: string | undefined): any {
+  if (!blk || typeof blk !== "object" || blk.type !== "tool_use") return blk;
+  if (!blk.input || typeof blk.input !== "object") return blk;
+  const input = blk.input;
+
+  switch (toolName) {
+    case "Edit":
+    case "NotebookEdit": {
+      let changed = false;
+      const next: any = { ...input };
+      if (typeof input.old_string === "string" && input.old_string.length > INPUT_STR_MAX) {
+        next.old_string = truncateArg(input.old_string, INPUT_STR_MAX);
+        changed = true;
+      }
+      if (typeof input.new_string === "string" && input.new_string.length > INPUT_STR_MAX) {
+        next.new_string = truncateArg(input.new_string, INPUT_STR_MAX);
+        changed = true;
+      }
+      return changed ? { ...blk, input: next } : blk;
+    }
+    case "MultiEdit": {
+      if (!Array.isArray(input.edits)) return blk;
+      let changed = false;
+      const newEdits = input.edits.map((e: any) => {
+        if (!e || typeof e !== "object") return e;
+        const eNext: any = { ...e };
+        if (typeof e.old_string === "string" && e.old_string.length > INPUT_STR_MAX) {
+          eNext.old_string = truncateArg(e.old_string, INPUT_STR_MAX);
+          changed = true;
+        }
+        if (typeof e.new_string === "string" && e.new_string.length > INPUT_STR_MAX) {
+          eNext.new_string = truncateArg(e.new_string, INPUT_STR_MAX);
+          changed = true;
+        }
+        return eNext;
+      });
+      return changed ? { ...blk, input: { ...input, edits: newEdits } } : blk;
+    }
+    case "Write": {
+      if (typeof input.content === "string" && input.content.length > INPUT_WRITE_CONTENT_MAX) {
+        return { ...blk, input: { ...input, content: truncateArg(input.content, INPUT_WRITE_CONTENT_MAX) } };
+      }
+      return blk;
+    }
+    case "Agent":
+    case "Task": {
+      // Subagent prompts can be huge. Keep first ~600 chars.
+      if (typeof input.prompt === "string" && input.prompt.length > 600) {
+        return { ...blk, input: { ...input, prompt: truncateArg(input.prompt, 600) } };
+      }
+      return blk;
+    }
+    default:
+      return blk;
+  }
+}
+
+/**
  * Tools that return an image block along with text — screenshots, image
  * generators, etc. The text block carries the signal; the image base64
  * is usually 50-100KB of noise that the model can't re-use on resume

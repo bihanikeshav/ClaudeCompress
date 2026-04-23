@@ -3,7 +3,7 @@ import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TrimOptions } from "./types.ts";
-import { squashToolResult } from "./squash.ts";
+import { squashToolResult, squashToolUseInput } from "./squash.ts";
 
 const TRIM_MARKER = "[TRIMMED by claudecompress] ";
 const REDACT_PLACEHOLDER = "";
@@ -418,13 +418,31 @@ export async function trimSession(
       }
     }
     // Universal squash: compress bloated tool outputs per-tool.
-    // Runs across safe/smart/slim; archive has no tool_results to squash.
+    // Runs across all non-archive modes. Archive has no tool_results.
+    //
+    // Separately, for records OUTSIDE the last-N window (safe/slim) or
+    // outside band 0 (smart), also compress tool_use INPUTS — Edit's
+    // old_string/new_string, Write's content, etc. These account for
+    // ~46% of session tokens on typical coding sessions. The model can
+    // re-Read the current file state if it needs detail on old diffs.
+    //
+    // Lossless preserves tool_use inputs verbatim (its contract).
     if (opts.mode !== "archive" && newRec?.message && Array.isArray(newRec.message.content)) {
+      const compressInputs =
+        (opts.mode === "safe" || opts.mode === "slim") ? !inRecent
+        : opts.mode === "smart" ? recordIdx < band0Cutoff
+        : /* lossless */ false;
+
       const squashed = newRec.message.content.map((blk: any) => {
-        if (blk?.type !== "tool_result") return blk;
-        const toolName = toolUseNames.get(blk.tool_use_id);
-        const toolInput = toolUseInputs.get(blk.tool_use_id);
-        return squashToolResult(blk, toolName, toolInput);
+        if (blk?.type === "tool_result") {
+          const toolName = toolUseNames.get(blk.tool_use_id);
+          const toolInput = toolUseInputs.get(blk.tool_use_id);
+          return squashToolResult(blk, toolName, toolInput);
+        }
+        if (blk?.type === "tool_use" && compressInputs) {
+          return squashToolUseInput(blk, blk.name);
+        }
+        return blk;
       });
       newRec = { ...newRec, message: { ...newRec.message, content: squashed } };
     }
