@@ -23,15 +23,15 @@ export const MODELS: ModelInfo[] = [
   {
     id: "claude-opus-4-7",
     label: "Opus 4.7",
-    inputPerMillion: 15,
-    cachedInputPerMillion: 1.5,
+    inputPerMillion: 5,
+    cachedInputPerMillion: 0.5,
     charsPerToken: 3.6,
   },
   {
     id: "claude-opus-4-6",
     label: "Opus 4.6",
-    inputPerMillion: 15,
-    cachedInputPerMillion: 1.5,
+    inputPerMillion: 5,
+    cachedInputPerMillion: 0.5,
     charsPerToken: 3.6,
   },
   {
@@ -44,8 +44,8 @@ export const MODELS: ModelInfo[] = [
   {
     id: "claude-haiku-4-5",
     label: "Haiku 4.5",
-    inputPerMillion: 0.8,
-    cachedInputPerMillion: 0.08,
+    inputPerMillion: 1,
+    cachedInputPerMillion: 0.1,
     charsPerToken: 3.6,
   },
 ];

@@ -50,11 +50,11 @@ Two entry points into the same trim engine.
 Type `/compress` in any session. The hook trims the active session's JSONL and prints a resume command.
 
 ```
-/compress               # Recency 5 (default) — observation masking + last 5 verbatim
-/compress recency 15    # keep a wider recent window
-/compress distill       # per-component rules — middle ground (~45% saved)
-/compress focus 5       # aggressive — drops older tool_use breadcrumbs
-/compress ultra         # archival — dialog only
+/compress               # safe (default) — observation masking + last 5 verbatim
+/compress safe 15       # keep a wider recent window
+/compress smart         # per-component rules — middle ground (~45% saved)
+/compress slim          # aggressive — drops older tool_use breadcrumbs (~70% saved)
+/compress archive       # historical only — dialog-only throughout (~84% saved)
 /compress force         # override cache-warm refusal
 ```
 
@@ -62,9 +62,9 @@ Hook output:
 
 ```
 ┌─ claudecompress ────────────────────────────────────────┐
-  mode:   recency (last 5) · drop thinking (outside last-N)
-  tokens: 761k → 511k       (saved ≈ 249k)
-  cost:   $22.83 → $15.35   (saved ≈ $7.48)  [Opus 4.6 · 200k+ tier]
+  mode:   safe (last 5) · drop thinking (outside last-N)
+  tokens: 761k → 511k      (saved ≈ 249k)
+  cost:   $3.80 → $2.56    (saved ≈ $1.24)   [Opus 4.6]
   trimmed session: 17420d99-7152-4359-bfdd-34c2cefe77e3
 └─────────────────────────────────────────────────────────┘
   Exit this session (Ctrl+C), then run:
@@ -75,7 +75,7 @@ Original JSONL is never touched. The trimmed sibling gets a fresh UUID and a `[T
 
 The running session can't be mutated from a hook; only `/compact` can, since it's in-process. Under `ccw` the hook auto-exits claude so the respawn loop picks up the trimmed session — you don't have to press Ctrl+C. Without `ccw`, press Ctrl+C twice and run the printed `--resume` command.
 
-**When cache is still warm, `/compress` refuses** and suggests `/compact` instead. `/compress` forces a resume and rebuilds the cache cold — that only pays off once the cache has already expired. While warm, `/compact` is the cheaper path: it shrinks context in place, no rebuild. Override with `/compress force` (or `/compress focus 5 force`) if you really want to trim a warm session.
+**When cache is still warm, `/compress` refuses** and suggests `/compact` instead. `/compress` forces a resume and rebuilds the cache cold — that only pays off once the cache has already expired. While warm, `/compact` is the cheaper path: it shrinks context in place, no rebuild. Override with `/compress force` (or `/compress slim 5 force`) if you really want to trim a warm session.
 
 ### Taking a break: `/break`
 
@@ -154,28 +154,28 @@ CCW_CLAUDE_CMD=claude-me ccw
 
 ## Modes
 
-Four modes, measured on a 761k-token Opus 4.6 session (153 user turns, 200k+ context tier):
+Four modes, measured on a 761k-token Opus 4.6 session (153 user turns):
 
 | Mode | % saved | $ saved | Quality risk | What it does |
 |---|---|---|---|---|
-| ⭐ **Recency N** (default, N=5) | 32.8% | $3.74 | Low | keep last N turns verbatim; observation-mask older (JetBrains-validated) |
-| **Distill** | 45.3% | $5.17 | Low-Med | per-component rules by turn depth; tool_use skeleton survives always |
-| **Focus N** (N=5) | 71.5% | $8.16 | Med | keep last N; older turns become dialog-only trail (loses breadcrumbs) |
-| **Ultra** | 83.5% | $9.53 | High | archival — drops everything structural, user+assistant text only |
+| ⭐ **safe** (default, N=5) | 32.8% | $1.24 | Low | keep last N turns verbatim; observation-mask older (JetBrains-validated) |
+| **smart** | 45.3% | $1.72 | Low-Med | per-component rules by turn depth; tool_use skeleton survives always |
+| **slim** (N=5) | 71.5% | $2.72 | Med | keep last N; older turns become dialog-only trail (loses breadcrumbs) |
+| **archive** | 83.5% | $3.17 | High | historical only — drops everything structural, user+assistant text only |
 
-**Why Recency 5 is the default.** JetBrains' 2025 NeurIPS study ("The Complexity Trap") tested **observation masking** — keeping tool call names and arguments but dropping old tool_result bodies — on 500 SWE-bench Verified tasks. It matched or beat LLM summarization on 4/5 model configs at 52% lower cost. Recency N implements exactly that pattern.
+**Why `safe` is the default.** JetBrains' 2025 NeurIPS study ("The Complexity Trap") tested **observation masking** — keeping tool call names and arguments but dropping old tool_result bodies — on 500 SWE-bench Verified tasks. It matched or beat LLM summarization on 4/5 model configs at 52% lower cost. `safe` implements exactly that pattern.
 
-**Distill** is the intelligent middle ground. It applies different rules to different content types at different turn depths — Read results drop after 15 turns, Bash truncates at 300 chars in the 6-15 band, Agent results (pre-summarized) survive longer, thinking drops beyond recent, `tool_use` metadata stays as a skeleton even at depth. Saves more than Recency while keeping more structure than Focus.
+**`smart`** is the intelligent middle ground. It applies different rules to different content types at different turn depths — Read results drop after 15 turns, Bash truncates at 300 chars in the 6-15 band, Agent results (pre-summarized) survive longer, thinking drops beyond recent, `tool_use` metadata stays as a skeleton even at depth. Saves more than `safe` while keeping more structure than `slim`.
 
-**Focus N** is more aggressive — it also drops `tool_use` metadata from older turns, which is **outside what any public benchmark has validated either way**. For topic-pivoting sessions, Chroma's Context Rot work suggests stale tool metadata could act as a distractor and Focus might actually help; for continuing the same task, keeping metadata is the safer call.
+**`slim`** is more aggressive — it also drops `tool_use` metadata from older turns, which is **outside what any public benchmark has validated either way**. For topic-pivoting sessions, Chroma's Context Rot work suggests stale tool metadata could act as a distractor and `slim` might actually help; for continuing the same task, keeping metadata is the safer call.
 
-See [theory →](https://bihanikeshav.github.io/ClaudeCompress/theory.html) for per-component relevance decay curves and how the Distill rule table was derived.
+See [theory →](https://bihanikeshav.github.io/ClaudeCompress/theory/) for per-component relevance decay curves and how the `smart` rule table was derived.
 
-**N counts your user messages**, not JSONL records. Each time you send a message, everything the agent does in response (tool calls, tool results, thinking, reply) is one "user turn". `Recency 5` keeps the last 5 back-and-forths fully intact and observation-masks everything older.
+**N counts your user messages**, not JSONL records. Each time you send a message, everything the agent does in response (tool calls, tool results, thinking, reply) is one "user turn". `safe 5` keeps the last 5 back-and-forths fully intact and observation-masks everything older.
 
-**Drop-thinking** (Recency/Focus only): scoped to turns outside the last-N window. Distill handles thinking per-band in its own rules.
+**Drop-thinking** (`safe`/`slim` only): scoped to turns outside the last-N window. `smart` handles thinking per-band in its own rules.
 
-Cost uses Opus 4.6's 200k+ input rate ($30/Mtok once context crosses the threshold, $15/Mtok otherwise — Ultra's 125k drops below the tier). Token counts are char-based approximations within ~10% of Anthropic's tokenizer.
+Cost uses Opus 4.6's input rate ($5/Mtok, cache read $0.50/Mtok). Anthropic confirmed the full 1M context is billed at flat per-token rates — no tier pricing. Token counts are char-based approximations within ~10% of Anthropic's tokenizer. Run `bunx claudecompress` on your own sessions to verify.
 
 ## When to trim
 

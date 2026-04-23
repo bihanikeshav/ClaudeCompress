@@ -950,11 +950,11 @@
 <body>
   <header>
     <div class="wrap">
-      <span class="brand"><span class="mark">◉</span><a href="index.html" class="current" aria-current="page">claudecompress</a></span>
+      <span class="brand"><span class="mark">◉</span><a href="/" class="current" aria-current="page">claudecompress</a></span>
       <span class="meta">
         <span id="npm-version">v0.7.0</span>
         <span class="dot-sep">·</span>
-        <a href="theory.html">theory</a>
+        <a href="/theory/">theory</a>
         <span class="dot-sep">·</span>
         <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
         <span class="dot-sep">·</span>
@@ -1017,10 +1017,10 @@
             <div class="hero-stat-head">Trim savings</div>
             <div class="hero-stat-content">
               <div class="hero-stat-body">
-                <span class="hero-stat-from">$22.83</span>
+                <span class="hero-stat-from">$3.80</span>
                 <span class="hero-stat-arrow">→</span>
-                <span class="hero-stat-to">$1.88</span>
-                <span class="hero-stat-pct">up to 12× cheaper</span>
+                <span class="hero-stat-to">$0.63</span>
+                <span class="hero-stat-pct">up to 6× cheaper</span>
               </div>
               <div class="hero-stat-foot">761k <span class="hero-stat-arrow">→</span> 125k tokens <span class="hero-stat-sep">·</span> Opus 4.6 cold rebuild</div>
               <div class="hero-stat-link">see breakdown ↓</div>
@@ -1060,16 +1060,16 @@
         <div class="split">
           <div>
             <h2>Trim <span class="italic">without</span> losing the thread.</h2>
-            <p class="intro"><code>Recency 5</code> (the default) keeps your last 5 exchanges fully intact: tool outputs, thinking, file contents. Older turns get <em>observation-masked</em> — tool call names and file paths stay as breadcrumbs, bodies drop. Research-aligned with JetBrains' 2025 observation-masking study.</p>
-            <p class="intro">Need more? <code>Distill</code> applies per-component rules by turn depth (~45% saved). <code>Focus 5</code> drops older breadcrumbs for ~70% saved. <code>Ultra</code> is archival.</p>
+            <p class="intro"><code>safe</code> (the default) keeps your last 5 exchanges fully intact: tool outputs, thinking, file contents. Older turns get <em>observation-masked</em> — tool call names and file paths stay as breadcrumbs, bodies drop. Research-aligned with JetBrains' 2025 observation-masking study.</p>
+            <p class="intro">Need more? <code>smart</code> applies per-component rules by turn depth (~45% saved). <code>slim</code> drops older breadcrumbs for ~70% saved. <code>archive</code> is historical only.</p>
             <p class="intro">Use <code>ccw</code>, the <code>claudecompress</code> wrapper, for a seamless resume. Or run <code>bunx claudecompress</code> as a standalone script.</p>
           </div>
           <div>
             <div class="demo-label">Inside a session</div>
             <div class="box"><span class="dim">┌─ claudecompress ───────────────────────┐</span>
-  mode:   recency 5 (default) <span class="dim">· drop older thinking</span>
+  mode:   safe (last 5) <span class="dim">· drop older thinking</span>
   tokens: 761k <span class="accent">→</span> 511k    <span class="savings">(saved ≈ 249k)</span>
-  cost:   $22.83 <span class="accent">→</span> $15.35 <span class="savings">(saved ≈ $7.48)</span>
+  cost:   $3.80 <span class="accent">→</span> $2.56  <span class="savings">(saved ≈ $1.24)</span>
   trimmed: 17420d99-7152-4359-bfdd…
 <span class="dim">└────────────────────────────────────────┘</span>
   <span class="dim">Ctrl+C, then:</span>  claude --resume 17420d99…</div>
@@ -1088,7 +1088,7 @@
       <div class="wrap">
         <div class="sec-tag"><span>Savings</span></div>
         <h2>Real numbers, real session.</h2>
-        <p class="intro intro-wide">Measured on a 761k-token Opus 4.6 session (153 user turns, 200k+ input tier). <code>Recency 5</code> (default) keeps the last 5 exchanges fully intact and observation-masks everything older — the pattern validated by JetBrains' 2025 NeurIPS paper. <code>Focus 5</code> is aggressive: 70% saved, drops older breadcrumbs. <code>Ultra</code> is archival. Run <code>bunx claudecompress</code> on your own sessions to verify the math.</p>
+        <p class="intro intro-wide">Measured on a 761k-token Opus 4.6 session (153 user turns). <code>safe</code> (default) keeps the last 5 exchanges fully intact and observation-masks everything older — the pattern validated by JetBrains' 2025 NeurIPS paper. <code>slim</code> is aggressive: 70% saved, drops older breadcrumbs. <code>archive</code> is historical. Opus 4.6 input is flat $5/Mtok (no tier pricing). Run <code>bunx claudecompress</code> on your own sessions to verify the math.</p>
         <div class="table-wrap">
           <table>
             <thead>
@@ -1100,11 +1100,11 @@
               </tr>
             </thead>
             <tbody>
-              <tr class="baseline"><td class="mode">Baseline</td><td>761k</td><td>$22.83</td><td>$0.00</td></tr>
-              <tr class="pick"><td class="mode">Recency 5</td><td class="tok tier-1">511k</td><td class="cost" data-start="22.83" data-target="15.35">$15.35</td><td class="saved tier-1">$7.48</td></tr>
-              <tr><td class="mode">Distill</td><td class="tok tier-2">416k</td><td class="cost" data-start="22.83" data-target="12.48">$12.48</td><td class="saved tier-2">$10.35</td></tr>
-              <tr><td class="mode">Focus 5</td><td class="tok tier-3">216k</td><td class="cost" data-start="22.83" data-target="6.49">$6.49</td><td class="saved tier-3">$16.34</td></tr>
-              <tr><td class="mode">Ultra</td><td class="tok tier-4">125k</td><td class="cost" data-start="22.83" data-target="1.88">$1.88</td><td class="saved tier-4">$20.95</td></tr>
+              <tr class="baseline"><td class="mode">Baseline</td><td>761k</td><td>$3.80</td><td>$0.00</td></tr>
+              <tr class="pick"><td class="mode">safe</td><td class="tok tier-1">511k</td><td class="cost" data-start="3.80" data-target="2.56">$2.56</td><td class="saved tier-1">$1.24</td></tr>
+              <tr><td class="mode">smart</td><td class="tok tier-2">416k</td><td class="cost" data-start="3.80" data-target="2.08">$2.08</td><td class="saved tier-2">$1.72</td></tr>
+              <tr><td class="mode">slim</td><td class="tok tier-3">216k</td><td class="cost" data-start="3.80" data-target="1.08">$1.08</td><td class="saved tier-3">$2.72</td></tr>
+              <tr><td class="mode">archive</td><td class="tok tier-4">125k</td><td class="cost" data-start="3.80" data-target="0.63">$0.63</td><td class="saved tier-4">$3.17</td></tr>
             </tbody>
           </table>
         </div>

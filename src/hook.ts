@@ -42,35 +42,27 @@ function readStdin(): Promise<string> {
   });
 }
 
-const VALID_MODES: TrimMode[] = ["recency", "focus", "distill", "ultra"];
-const LEGACY_MODES = new Set(["redact", "smart", "truncate", "sift"]);
+const VALID_MODES: TrimMode[] = ["safe", "smart", "slim", "archive"];
 
 function parseCompressArgs(
   prompt: string,
-): (TrimOptions & { force?: boolean; legacyMode?: string }) | null {
+): (TrimOptions & { force?: boolean }) | null {
   const m = prompt.trim().match(/^\/compress\b\s*(.*)$/);
   if (!m) return null;
   const allTokens = (m[1] ?? "").trim().split(/\s+/).filter(Boolean);
   const force = allTokens.includes("force") || allTokens.includes("--force");
   const tokens = allTokens.filter((t) => t !== "force" && t !== "--force");
-  const modeTok = tokens[0] ?? "recency";
+  const modeTok = tokens[0] ?? "safe";
 
-  // Legacy mode names (redact/smart/truncate) map to recency with a note.
-  let mode: TrimMode = "recency";
-  let legacyMode: string | undefined;
-  if ((VALID_MODES as string[]).includes(modeTok)) {
-    mode = modeTok as TrimMode;
-  } else if (LEGACY_MODES.has(modeTok)) {
-    legacyMode = modeTok;
-    mode = "recency";
-  }
+  const mode: TrimMode = (VALID_MODES as string[]).includes(modeTok)
+    ? (modeTok as TrimMode)
+    : "safe";
 
-  const opts: TrimOptions & { force?: boolean; legacyMode?: string } = { mode };
+  const opts: TrimOptions & { force?: boolean } = { mode };
   if (force) opts.force = true;
-  if (legacyMode) opts.legacyMode = legacyMode;
-  if (mode === "recency" || mode === "focus")
+  if (mode === "safe" || mode === "slim")
     opts.keepLastN = Number(tokens[1]) || 5;
-  if (mode !== "ultra") opts.dropThinking = true;
+  if (mode !== "archive") opts.dropThinking = true;
   return opts;
 }
 
@@ -106,10 +98,10 @@ function fmtTokens(n: number): string {
 }
 
 function modeLabel(opts: TrimOptions): string {
-  if (opts.mode === "recency" || opts.mode === "focus")
+  if (opts.mode === "safe" || opts.mode === "slim")
     return `${opts.mode} (last ${opts.keepLastN})`;
-  if (opts.mode === "distill") return "distill (per-component, aggressive)";
-  return opts.mode;
+  if (opts.mode === "smart") return "smart (per-component)";
+  return opts.mode; // archive
 }
 
 interface CacheState {
@@ -201,7 +193,7 @@ function scheduleParentExit(exitCode: number): void {
 
 async function runCompressHook(
   input: HookInput,
-  opts: TrimOptions & { force?: boolean; legacyMode?: string },
+  opts: TrimOptions & { force?: boolean; legacyMode?: string; renamedFrom?: string },
 ): Promise<void> {
   const sessionFile = resolveSessionFile(input);
   if (!sessionFile) {
@@ -259,7 +251,10 @@ async function runCompressHook(
       "┌─ claudecompress ────────────────────────────────────────┐",
     ];
     if (opts.legacyMode) {
-      lines.push(`  note:   '${opts.legacyMode}' mode was removed in v0.10 → using recency instead`);
+      lines.push(`  note:   '${opts.legacyMode}' was removed → using safe instead`);
+    }
+    if (opts.renamedFrom) {
+      lines.push(`  note:   '${opts.renamedFrom}' was renamed to '${opts.mode}' in v0.11`);
     }
     lines.push(
       `  mode:   ${modeLabel(opts)}${opts.dropThinking ? " · drop thinking (outside last-N window)" : ""}`,

@@ -315,17 +315,17 @@ export async function trimSession(
   let lastKeptUuid: string | null = null;
   const toolUseNames = new Map<string, string>();
 
-  // Recency and focus both need a cutoff; ultra doesn't (it nukes everything).
-  const needsCutoff = opts.mode === "recency" || opts.mode === "focus";
+  // safe and slim both need a cutoff; archive doesn't (drops everything structural).
+  const needsCutoff = opts.mode === "safe" || opts.mode === "slim";
   const cutoffRecordIdx = needsCutoff
     ? findRecencyCutoffRecordIndex(inputPath, opts.keepLastN ?? 5)
     : 0;
 
-  // Distill uses two cutoffs for three bands:
+  // smart mode uses two cutoffs for three bands:
   //   band 0: <= 5 user turns back
   //   band 1: 6–15 user turns back
   //   band 2: 16+ user turns back
-  const isBanded = opts.mode === "distill";
+  const isBanded = opts.mode === "smart";
   const band0Cutoff = isBanded ? findRecencyCutoffRecordIndex(inputPath, 5) : 0;
   const band1Cutoff = isBanded ? findRecencyCutoffRecordIndex(inputPath, 15) : 0;
 
@@ -335,7 +335,7 @@ export async function trimSession(
   // model actively uses on the next turn. Default window: 5 user turns if
   // the mode doesn't specify its own keepLastN.
   const thinkingKeepN = opts.keepLastN ?? 5;
-  const thinkingCutoffIdx = opts.dropThinking && opts.mode !== "ultra"
+  const thinkingCutoffIdx = opts.dropThinking && opts.mode !== "archive"
     ? findRecencyCutoffRecordIndex(inputPath, thinkingKeepN)
     : 0;
 
@@ -347,23 +347,23 @@ export async function trimSession(
     try {
       rec = JSON.parse(line);
     } catch {
-      if (opts.mode !== "ultra") outStream.write(line + "\n");
+      if (opts.mode !== "archive") outStream.write(line + "\n");
       continue;
     }
     recordIdx += 1;
     const inRecent = needsCutoff && recordIdx >= cutoffRecordIdx;
     let newRec: any | null;
-    if (opts.mode === "ultra") {
+    if (opts.mode === "archive") {
       newRec = ultraTrimRecord(rec, newSid);
       if (!newRec) continue;
       newRec.parentUuid = lastKeptUuid;
       lastKeptUuid = newRec.uuid ?? lastKeptUuid;
-    } else if (opts.mode === "recency") {
+    } else if (opts.mode === "safe") {
       newRec = inRecent
         ? { ...rec, ...(rec.sessionId ? { sessionId: newSid } : {}) }
         : trimRecordRedact(rec, newSid);
       if (!newRec) continue;
-    } else if (opts.mode === "distill") {
+    } else if (opts.mode === "smart") {
       const band: 0 | 1 | 2 =
         recordIdx >= band0Cutoff ? 0
         : recordIdx >= band1Cutoff ? 1
@@ -371,7 +371,7 @@ export async function trimSession(
       newRec = trimRecordBanded(rec, newSid, band, toolUseNames);
       if (!newRec) continue;
     } else {
-      // focus
+      // slim
       const isTurn = rec.type === "user" || rec.type === "assistant";
       if (!isTurn) {
         if (!inRecent) continue;
@@ -388,9 +388,9 @@ export async function trimSession(
         lastKeptUuid = newRec.uuid ?? lastKeptUuid;
       }
     }
-    // drop-thinking applies only to recency/focus — sift/distill handle thinking
-    // in their per-band rules, and ultra strips everything structural anyway.
-    if (opts.dropThinking && (opts.mode === "recency" || opts.mode === "focus")) {
+    // drop-thinking applies only to safe/slim — smart handles thinking in its
+    // per-band rules, and archive strips everything structural anyway.
+    if (opts.dropThinking && (opts.mode === "safe" || opts.mode === "slim")) {
       const inThinkingWindow = recordIdx >= thinkingCutoffIdx;
       if (!inThinkingWindow) {
         newRec = dropThinkingBlocks(newRec);

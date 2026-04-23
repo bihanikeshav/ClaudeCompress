@@ -10,7 +10,7 @@
   <meta property="og:type" content="article" />
   <meta property="og:title" content="claudecompress · theory" />
   <meta property="og:description" content="Which parts of a Claude Code session matter, which decay, and how fast." />
-  <meta property="og:url" content="https://bihanikeshav.github.io/ClaudeCompress/theory.html" />
+  <meta property="og:url" content="https://bihanikeshav.github.io/ClaudeCompress/theory/" />
   <meta property="og:image" content="https://bihanikeshav.github.io/ClaudeCompress/claude-code.png" />
   <meta name="twitter:card" content="summary_large_image" />
 
@@ -444,11 +444,11 @@
 <body>
   <header>
     <div class="wrap">
-      <span class="brand"><span class="mark">◉</span><a href="index.html">claudecompress</a></span>
+      <span class="brand"><span class="mark">◉</span><a href="/">claudecompress</a></span>
       <span class="meta">
         <span id="npm-version">v0.7.0</span>
         <span class="dot-sep">·</span>
-        <a href="theory.html" class="current" aria-current="page">theory</a>
+        <a href="/theory/" class="current" aria-current="page">theory</a>
         <span class="dot-sep">·</span>
         <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
         <span class="dot-sep">·</span>
@@ -460,7 +460,7 @@
   <main>
     <section class="hero">
       <div class="wrap">
-        <a class="back-link" href="index.html">← back</a>
+        <a class="back-link" href="/">← back</a>
         <div class="kicker">Theory</div>
         <h1>Why <span class="italic">trimming</span> works.</h1>
         <p class="lede">User instructions stay relevant for hours. A file you read twenty turns ago is almost certainly stale. Most of a long session is <em>rederivable noise</em> that can be cut without the model losing the thread.</p>
@@ -479,7 +479,7 @@
           <cite><a href="https://arxiv.org/abs/2508.21433">Lindenbauer &amp; Fraser · JetBrains Research · 2025</a></cite>
         </blockquote>
 
-        <p class="intro">The paper's formalization is specific: past observations (tool_result bodies) are replaced; agent reasoning and actions (tool_use calls with names and arguments) are preserved verbatim. Recency mode in claudecompress maps to exactly this pattern for older turns. Focus mode goes further and drops the tool_use metadata too — which is outside what the paper validated either way.</p>
+        <p class="intro">The paper's formalization is specific: past observations (tool_result bodies) are replaced; agent reasoning and actions (tool_use calls with names and arguments) are preserved verbatim. The <code>safe</code> mode in claudecompress maps to exactly this pattern for older turns. <code>slim</code> goes further and drops the tool_use metadata too — which is outside what the paper validated either way.</p>
       </div>
     </section>
 
@@ -593,7 +593,7 @@
         <p class="caption"><span style="color:#a4c27a">Green</span> = keep, <span style="color:#e0b45c">amber</span> = consider trimming, <span style="color:#e2704c">coral</span> = safe to compress.</p>
 
         <ul class="prose" style="margin-top:1.5rem">
-          <li><strong>Focus 5 keeps the last 5 user turns verbatim</strong> — tool outputs, thinking, everything. Full working memory for recent state.</li>
+          <li><strong>safe (last 5) keeps the last 5 user turns verbatim</strong> — tool outputs, thinking, everything. Full working memory for recent state.</li>
           <li><strong>Older turns become a dialog trail</strong> — user text, assistant text, tool call names and arguments. The breadcrumb survives.</li>
           <li><strong>Raw bodies are dropped in older turns</strong> — file contents, bash output, search results. Re-invoke the tool when needed.</li>
         </ul>
@@ -632,25 +632,25 @@
               </tr>
             </thead>
             <tbody>
-              <tr><td class="mode-cell">Recency 5 (default)</td><td>32.8%</td><td class="keeps">low</td><td>Continuing the same task — research-aligned</td></tr>
-              <tr><td class="mode-cell">Distill</td><td>45.3%</td><td class="keeps">low-med</td><td>Middle ground — per-component truncation, skeleton survives</td></tr>
-              <tr><td class="mode-cell">Focus 5</td><td>71.5%</td><td class="trims">med</td><td>Big session, cost-sensitive, pivoting topics</td></tr>
-              <tr><td class="mode-cell">Ultra</td><td>83.5%</td><td class="drops">high</td><td>Archival — not for continuing work</td></tr>
+              <tr><td class="mode-cell">safe (default)</td><td>32.8%</td><td class="keeps">low</td><td>Continuing the same task — research-aligned</td></tr>
+              <tr><td class="mode-cell">smart</td><td>45.3%</td><td class="keeps">low-med</td><td>Middle ground — per-component truncation, skeleton survives</td></tr>
+              <tr><td class="mode-cell">slim</td><td>71.5%</td><td class="trims">med</td><td>Big session, cost-sensitive, pivoting topics</td></tr>
+              <tr><td class="mode-cell">archive</td><td>83.5%</td><td class="drops">high</td><td>Historical only — not for continuing work</td></tr>
             </tbody>
           </table>
         </div>
 
-        <p class="caption">Quality risk is qualitative. Recency sits closest to JetBrains' observation-masking pattern (tested at scale). Distill applies per-component rules by turn depth: Read results drop after 15 turns, Bash truncates, Agent results survive longer (they're pre-summarized), <code>tool_use</code> metadata always stays as a skeleton. Focus drops older <code>tool_use</code> metadata — not proven worse, but outside what the paper validated.</p>
+        <p class="caption">Quality risk is qualitative. <code>safe</code> sits closest to JetBrains' observation-masking pattern (tested at scale). <code>smart</code> applies per-component rules by turn depth: Read results drop after 15 turns, Bash truncates, Agent results survive longer (they're pre-summarized), <code>tool_use</code> metadata always stays as a skeleton. <code>slim</code> drops older <code>tool_use</code> metadata — not proven worse, but outside what the paper validated.</p>
 
-        <p class="intro" style="margin-top: 1.4rem"><strong style="color:var(--fg-soft);font-weight:500">Counter-case for Focus.</strong> Chroma's Context Rot study finds that semantically-similar-but-irrelevant tokens actively mislead models (distractor interference). In a session where you've pivoted topic, retained stale tool_use calls with old file paths become textbook distractors. JetBrains tested on SWE-bench where older tool calls stay topic-relevant; in pivot-heavy sessions Focus's more aggressive trimming could plausibly help. There's no public benchmark that directly measures this — Recency is the safer default because it matches a tested pattern, not because Focus is proven-worse.</p>
+        <p class="intro" style="margin-top: 1.4rem"><strong style="color:var(--fg-soft);font-weight:500">Counter-case for slim.</strong> Chroma's Context Rot study finds that semantically-similar-but-irrelevant tokens actively mislead models (distractor interference). In a session where you've pivoted topic, retained stale tool_use calls with old file paths become textbook distractors. JetBrains tested on SWE-bench where older tool calls stay topic-relevant; in pivot-heavy sessions <code>slim</code>'s more aggressive trimming could plausibly help. There's no public benchmark that directly measures this — <code>safe</code> is the safer default because it matches a tested pattern, not because <code>slim</code> is proven-worse.</p>
       </div>
     </section>
 
     <section>
       <div class="wrap">
-        <div class="sec-tag">Distill rule table</div>
+        <div class="sec-tag">smart rule table</div>
         <h2>Per-component, per-depth.</h2>
-        <p class="intro">Distill's rules derive from the relevance curves above. High-relevance components (user text, <code>tool_use</code> metadata) survive at all depths. Steep-decay components (Read, Bash, Grep results) truncate in the middle band and drop in the tail. Pre-summarized components (Agent results) survive longer because they're already condensed.</p>
+        <p class="intro">The <code>smart</code> mode's rules derive from the relevance curves above. High-relevance components (user text, <code>tool_use</code> metadata) survive at all depths. Steep-decay components (Read, Bash, Grep results) truncate in the middle band and drop in the tail. Pre-summarized components (Agent results) survive longer because they're already condensed.</p>
 
         <div class="table-wrap">
           <table>
@@ -672,7 +672,7 @@
           </table>
         </div>
 
-        <p class="caption">Values are char limits for <code>truncate N</code>. <code>tool_use</code> always kept so the skeleton of what-files-were-touched survives at any depth — the key differentiator vs Focus. Recent turns (last 5) still get truncation on long content (thinking, big assistant text) because model state is rarely load-bearing on long prose blocks. Images always drop.</p>
+        <p class="caption">Values are char limits for <code>truncate N</code>. <code>tool_use</code> always kept so the skeleton of what-files-were-touched survives at any depth — the key differentiator vs <code>slim</code>. Recent turns (last 5) still get truncation on long content (thinking, big assistant text) because model state is rarely load-bearing on long prose blocks. Images always drop.</p>
       </div>
     </section>
 
@@ -725,7 +725,7 @@
     <div class="wrap">
       <span>MIT license</span>
       <span>
-        <a href="index.html">home</a>
+        <a href="/">home</a>
         <span class="dot-sep">·</span>
         <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
         <span class="dot-sep">·</span>

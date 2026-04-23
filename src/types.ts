@@ -1,10 +1,14 @@
-export type TrimMode = "ultra" | "recency" | "focus" | "distill";
+export type TrimMode = "safe" | "smart" | "slim" | "archive";
 
 /**
- * Legacy modes kept parseable so old slash commands don't silently fail.
- * The hook maps any legacy mode to `recency` and prints a deprecation note.
+ * Legacy mode names from earlier versions, kept parseable so old slash
+ * commands don't silently fail. The hook maps them to current names.
+ * v0.11 rename: recency→safe, distill→smart, focus→slim, ultra→archive.
+ * v0.10 removals: redact, truncate, sift, old "smart" (per-tool rules).
  */
-export type LegacyTrimMode = "redact" | "smart" | "truncate" | "sift";
+export type LegacyTrimMode =
+  | "recency" | "distill" | "focus" | "ultra"
+  | "redact" | "truncate" | "sift";
 
 export interface TrimOptions {
   mode: TrimMode;

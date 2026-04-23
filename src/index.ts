@@ -167,10 +167,10 @@ async function estimateModeSavings(
   const baseCost = estimateColdResumeCost(baseTokens, model);
 
   const jobs: { key: string; opts: TrimOptions }[] = [
-    { key: "recency", opts: { mode: "recency", keepLastN: defaultN, dropThinking: true } },
-    { key: "distill", opts: { mode: "distill" } },
-    { key: "focus", opts: { mode: "focus", keepLastN: defaultN, dropThinking: true } },
-    { key: "ultra", opts: { mode: "ultra" } },
+    { key: "safe", opts: { mode: "safe", keepLastN: defaultN, dropThinking: true } },
+    { key: "smart", opts: { mode: "smart" } },
+    { key: "slim", opts: { mode: "slim", keepLastN: defaultN, dropThinking: true } },
+    { key: "archive", opts: { mode: "archive" } },
   ];
 
   const out: Record<string, { after: number; saved: number }> = {};
@@ -212,23 +212,23 @@ async function pickMode(
 
   const mode = await p.select({
     message: "How aggressive?",
-    initialValue: "recency",
+    initialValue: "safe",
     options: [
       {
-        value: "recency",
-        label: `${pc.blue("Recency")}  ${pc.green("★")} ${pc.dim("keep last N verbatim, observation-mask older (research-aligned)")}${savingsTag("recency")}`,
+        value: "safe",
+        label: `${pc.blue("safe")}  ${pc.green("★")} ${pc.dim("keep last N verbatim, observation-mask older — research-aligned")}${savingsTag("safe")}`,
       },
       {
-        value: "distill",
-        label: `${pc.yellow("Distill")}  ${pc.dim("per-component rules — middle ground, tool skeleton survives at depth")}${savingsTag("distill")}`,
+        value: "smart",
+        label: `${pc.yellow("smart")}  ${pc.dim("per-component rules by turn depth — tool skeleton survives")}${savingsTag("smart")}`,
       },
       {
-        value: "focus",
-        label: `${pc.cyan("Focus")}  ${pc.dim("aggressive — dialog trail only for older turns (loses breadcrumbs)")}${savingsTag("focus")}`,
+        value: "slim",
+        label: `${pc.cyan("slim")}  ${pc.dim("dialog trail only for older turns — loses breadcrumbs")}${savingsTag("slim")}`,
       },
       {
-        value: "ultra",
-        label: `${pc.green("Ultra")}  ${pc.dim("archival — dialog only, tool calls/results/thinking all dropped")}${savingsTag("ultra")}`,
+        value: "archive",
+        label: `${pc.green("archive")}  ${pc.dim("dialog only throughout — historical, not for continuing work")}${savingsTag("archive")}`,
       },
     ],
   });
@@ -236,7 +236,7 @@ async function pickMode(
 
   let baseOpts: TrimOptions = { mode: mode as TrimMode };
 
-  if (mode === "recency" || mode === "focus" || mode === "sift" || mode === "distill") {
+  if (mode === "safe" || mode === "slim") {
     const raw = await p.text({
       message: "How many recent user turns (your messages) to keep verbatim?",
       placeholder: String(defaultN),
@@ -250,7 +250,7 @@ async function pickMode(
     baseOpts = { mode: mode as TrimMode, keepLastN: Number(raw) };
   }
 
-  if (mode !== "ultra") {
+  if (mode !== "archive" && mode !== "smart") {
     const drop = await p.confirm({
       message: "Also drop thinking blocks? (extra savings, safe on resume)",
       initialValue: true,
