@@ -62,9 +62,9 @@ Hook output:
 
 ```
 ┌─ claudecompress ────────────────────────────────────────┐
-  mode:   safe (last 5) · drop thinking (outside last-N)
-  tokens: 761k → 511k      (saved ≈ 249k)
-  cost:   $3.80 → $2.56    (saved ≈ $1.24)   [Opus 4.6]
+  mode:   safe (last 5) · drop thinking (outside last-N) · squash
+  tokens: 761k → 502k      (saved ≈ 259k)
+  cost:   $7.61 → $5.02    (saved ≈ $2.59)   [Opus 4.6 · 1h cache cold rebuild]
   trimmed session: 17420d99-7152-4359-bfdd-34c2cefe77e3
 └─────────────────────────────────────────────────────────┘
   Exit this session (Ctrl+C), then run:
@@ -158,10 +158,12 @@ Four modes, measured on a 761k-token Opus 4.6 session (153 user turns):
 
 | Mode | % saved | $ saved | Quality risk | What it does |
 |---|---|---|---|---|
-| ⭐ **safe** (default, N=5) | 32.8% | $1.24 | Low | keep last N turns verbatim; observation-mask older (JetBrains-validated) |
-| **smart** | 45.3% | $1.72 | Low-Med | per-component rules by turn depth; tool_use skeleton survives always |
-| **slim** (N=5) | 71.5% | $2.72 | Med | keep last N; older turns become dialog-only trail (loses breadcrumbs) |
-| **archive** | 83.5% | $3.17 | High | historical only — drops everything structural, user+assistant text only |
+| ⭐ **safe** (default, N=5) | 34.0% | $2.59 | Low | keep last N turns verbatim; observation-mask older (JetBrains-validated) |
+| **smart** | 45.3% | $3.44 | Low-Med | per-component rules by turn depth; tool_use skeleton survives always |
+| **slim** (N=5) | 72.8% | $5.54 | Med | keep last N; older turns become dialog-only trail (loses breadcrumbs) |
+| **archive** | 83.5% | $6.35 | High | historical only — drops everything structural, user+assistant text only |
+
+All modes also apply **squash** (rtk-style per-tool-call compression) to preserved tool outputs. Verbose `git push`, `npm install`, test runner, and similar commands get rewritten to their signal (pass/fail, count, error lines) instead of raw output. Adds ~1-2% savings on top with no quality cost.
 
 **Why `safe` is the default.** JetBrains' 2025 NeurIPS study ("The Complexity Trap") tested **observation masking** — keeping tool call names and arguments but dropping old tool_result bodies — on 500 SWE-bench Verified tasks. It matched or beat LLM summarization on 4/5 model configs at 52% lower cost. `safe` implements exactly that pattern.
 
@@ -175,7 +177,7 @@ See [theory →](https://bihanikeshav.github.io/ClaudeCompress/theory/) for per-
 
 **Drop-thinking** (`safe`/`slim` only): scoped to turns outside the last-N window. `smart` handles thinking per-band in its own rules.
 
-Cost uses Opus 4.6's input rate ($5/Mtok, cache read $0.50/Mtok). Anthropic confirmed the full 1M context is billed at flat per-token rates — no tier pricing. Token counts are char-based approximations within ~10% of Anthropic's tokenizer. Run `bunx claudecompress` on your own sessions to verify.
+Cost reflects **cold /resume** on Claude Code, which rebuilds the full session into 1h cache. Per Anthropic's pricing: 1h cache write = 2× base input. For Opus 4.6 that's $10/Mtok (= 2 × $5/Mtok base). The full 1M context is billed at flat per-token rates — no tier pricing on Opus 4.5+. Token counts are char-based approximations within ~10% of Anthropic's tokenizer. Run `bunx claudecompress` on your own sessions to verify.
 
 ## When to trim
 

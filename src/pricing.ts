@@ -1,9 +1,14 @@
 /**
  * Per-model pricing and token-estimation ratios.
  *
- * Pricing is USD per 1M tokens on cold input (no cache hit).
- * Prompt-cache hits are ~10% of input rate, cache writes ~125%.
- * Cold /resume after a cache expiry pays full input on every replayed token.
+ * Pricing is USD per 1M tokens, sourced from platform.claude.com/docs/en/about-claude/pricing.
+ *
+ * `inputPerMillion` is the base input rate (no cache).
+ * `cachedInputPerMillion` is the cache read rate (~10% of base input).
+ *
+ * Cold /resume on Claude Code writes the full session into 1h cache. Per
+ * Anthropic's pricing: 1h cache write = 2× base input. So cold rebuild cost
+ * is `inputPerMillion * 2 * tokens / 1M`. estimateColdResumeCost handles this.
  *
  * `charsPerToken` is an empirical ratio used for quick estimation without
  * shipping a full tokenizer. Claude's tokenizer isn't publicly distributed,
@@ -58,8 +63,13 @@ export function estimateTokens(chars: number, model: ModelInfo): number {
   return Math.round(chars / model.charsPerToken);
 }
 
+/**
+ * Cost of a cold /resume: the full session gets re-cached at 1h cache write
+ * rate (2× base input per Anthropic's pricing). Claude Code uses 1h cache
+ * breakpoints by default, so this is the realistic cold rebuild cost.
+ */
 export function estimateColdResumeCost(tokens: number, model: ModelInfo): number {
-  return (tokens / 1_000_000) * model.inputPerMillion;
+  return (tokens / 1_000_000) * model.inputPerMillion * 2;
 }
 
 export function formatUSD(n: number): string {

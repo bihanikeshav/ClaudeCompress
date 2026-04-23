@@ -3,6 +3,7 @@ import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TrimOptions } from "./types.ts";
+import { squashToolResult } from "./squash.ts";
 
 const TRIM_MARKER = "[TRIMMED by claudecompress] ";
 const REDACT_PLACEHOLDER = "";
@@ -314,6 +315,30 @@ export async function trimSession(
   let marked = false;
   let lastKeptUuid: string | null = null;
   const toolUseNames = new Map<string, string>();
+  const toolUseInputs = new Map<string, any>();
+
+  // Prescan: collect every tool_use → (name, input) so squash can look them
+  // up by tool_use_id when it encounters a tool_result. Streaming the file
+  // in order already sees tool_use before the matching tool_result, so we
+  // could populate this inline, but banded mode's record-skipping logic
+  // makes the prescan safer.
+  {
+    const fd = readFileSync(inputPath, "utf8");
+    for (const line of fd.split("\n")) {
+      if (!line) continue;
+      try {
+        const rec = JSON.parse(line);
+        const content = rec?.message?.content;
+        if (!Array.isArray(content)) continue;
+        for (const blk of content) {
+          if (blk?.type === "tool_use" && blk.id) {
+            if (blk.name) toolUseNames.set(blk.id, blk.name);
+            if (blk.input) toolUseInputs.set(blk.id, blk.input);
+          }
+        }
+      } catch {}
+    }
+  }
 
   // safe and slim both need a cutoff; archive doesn't (drops everything structural).
   const needsCutoff = opts.mode === "safe" || opts.mode === "slim";
@@ -388,6 +413,18 @@ export async function trimSession(
         lastKeptUuid = newRec.uuid ?? lastKeptUuid;
       }
     }
+    // Universal squash: compress bloated tool outputs per-tool.
+    // Runs across safe/smart/slim; archive has no tool_results to squash.
+    if (opts.mode !== "archive" && newRec?.message && Array.isArray(newRec.message.content)) {
+      const squashed = newRec.message.content.map((blk: any) => {
+        if (blk?.type !== "tool_result") return blk;
+        const toolName = toolUseNames.get(blk.tool_use_id);
+        const toolInput = toolUseInputs.get(blk.tool_use_id);
+        return squashToolResult(blk, toolName, toolInput);
+      });
+      newRec = { ...newRec, message: { ...newRec.message, content: squashed } };
+    }
+
     // drop-thinking applies only to safe/slim — smart handles thinking in its
     // per-band rules, and archive strips everything structural anyway.
     if (opts.dropThinking && (opts.mode === "safe" || opts.mode === "slim")) {
