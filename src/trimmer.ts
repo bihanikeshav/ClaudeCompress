@@ -385,7 +385,7 @@ export async function trimSession(
   const band1Cutoff = isBanded ? cutoffFor(15) : 0;
 
   const thinkingKeepN = opts.keepLastN ?? 5;
-  const thinkingCutoffIdx = opts.dropThinking && opts.mode !== "archive"
+  const thinkingCutoffIdx = opts.dropThinking
     ? cutoffFor(thinkingKeepN)
     : 0;
 
@@ -397,7 +397,7 @@ export async function trimSession(
     try {
       rec = JSON.parse(line);
     } catch {
-      if (opts.mode !== "archive") outStream.write(line + "\n");
+      outStream.write(line + "\n");
       continue;
     }
     recordIdx += 1;
@@ -409,12 +409,7 @@ export async function trimSession(
 
     const inRecent = needsCutoff && recordIdx >= cutoffRecordIdx;
     let newRec: any | null;
-    if (opts.mode === "archive") {
-      newRec = ultraTrimRecord(rec, newSid);
-      if (!newRec) continue;
-      newRec.parentUuid = lastKeptUuid;
-      lastKeptUuid = newRec.uuid ?? lastKeptUuid;
-    } else if (opts.mode === "lossless") {
+    if (opts.mode === "lossless") {
       // Pass the record through unchanged (modulo sessionId). Only the
       // universal squash step below will touch tool_results.
       newRec = { ...rec, ...(rec.sessionId ? { sessionId: newSid } : {}) };
@@ -451,9 +446,7 @@ export async function trimSession(
     // Universal squash: compress tool outputs, dedup superseded Reads /
     // TodoWrites, and (for non-lossless modes outside the recent window)
     // compress tool_use INPUTS + truncate verbose older assistant text.
-    //
-    // Applied across all non-archive modes. Archive strips tool structure.
-    if (opts.mode !== "archive" && newRec?.message && Array.isArray(newRec.message.content)) {
+    if (newRec?.message && Array.isArray(newRec.message.content)) {
       const compressInputs =
         (opts.mode === "safe" || opts.mode === "slim") ? !inRecent
         : opts.mode === "smart" ? recordIdx < band0Cutoff

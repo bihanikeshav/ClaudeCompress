@@ -368,7 +368,7 @@ export async function runStatusline(): Promise<void> {
     );
   } else {
     process.stdout.write(
-      `${color(RED, "○")} ${color(RED, "cache cold")} ${dim("·")} ${fmtElapsed(-remainingSec)} past${modelTag} ${dim("·")} ${color(YELLOW, "/compress to trim before rebuild")}`,
+      `${color(RED, "○")} ${color(RED, "cache cold")} ${dim("·")} ${fmtElapsed(-remainingSec)} past${modelTag} ${dim("·")} ${color(YELLOW, "/compress to save tokens")}`,
     );
   }
 }

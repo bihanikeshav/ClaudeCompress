@@ -171,7 +171,6 @@ async function estimateModeSavings(
     { key: "safe", opts: { mode: "safe", keepLastN: defaultN, dropThinking: true } },
     { key: "smart", opts: { mode: "smart" } },
     { key: "slim", opts: { mode: "slim", keepLastN: defaultN, dropThinking: true } },
-    { key: "archive", opts: { mode: "archive" } },
   ];
 
   const out: Record<string, { after: number; saved: number }> = {};
@@ -231,10 +230,6 @@ async function pickMode(
         value: "slim",
         label: `${pc.cyan("slim")}  ${pc.dim("dialog trail only for older turns — loses breadcrumbs")}${savingsTag("slim")}`,
       },
-      {
-        value: "archive",
-        label: `${pc.green("archive")}  ${pc.dim("dialog only throughout — historical, not for continuing work")}${savingsTag("archive")}`,
-      },
     ],
   });
   if (p.isCancel(mode)) return null;
@@ -256,7 +251,7 @@ async function pickMode(
     baseOpts = { mode: mode as TrimMode, keepLastN: Number(raw) };
   }
 
-  if (mode !== "archive" && mode !== "smart") {
+  if (mode !== "smart" && mode !== "lossless") {
     const drop = await p.confirm({
       message: "Also drop thinking blocks? (extra savings, safe on resume)",
       initialValue: true,

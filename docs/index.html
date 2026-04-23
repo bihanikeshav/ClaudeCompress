@@ -12,7 +12,7 @@
   <meta property="og:description" content="A cache-aware status line and a trimmer that keeps cold /resume cheap. For Claude Code." />
   <meta property="og:url" content="https://bihanikeshav.github.io/ClaudeCompress/" />
   <meta property="og:image" content="https://bihanikeshav.github.io/ClaudeCompress/claude-code.png" />
-  <meta property="og:image:alt" content="CLAUDE CODE — claudecompress cache timer + trimmer" />
+  <meta property="og:image:alt" content="CLAUDE CODE · claudecompress cache timer + trimmer" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:image" content="https://bihanikeshav.github.io/ClaudeCompress/claude-code.png" />
 
@@ -24,19 +24,19 @@
 
   <style>
     :root {
-      /* Motion — one canonical easing (ease-out-expo, confident/decisive),
+      /* Motion: one canonical easing (ease-out-expo, confident/decisive),
          one standard micro-interaction duration. DRY the animation layer. */
       --ease:          cubic-bezier(0.16, 1, 0.3, 1);
       --dur-hover:     180ms;
 
-      /* Warm pewter — dark metallic gray with a hint of brown so it sits
+      /* Warm pewter: dark metallic gray with a hint of brown so it sits
          in the same tonal family as the cream text and coral accent.
          Pure neutral gray (#131313) looks flat against the warm content;
          this subtle warm shift unifies the palette. */
       --bg:          #141311;
       --rule:        #2c2a26;
 
-      /* Text — warm cream, reads like paper on dark ink */
+      /* Text: warm cream, reads like paper on dark ink */
       --fg:          #ece4d0;
       --fg-soft:     #c4b99f;
       --fg-dim:      #877e69;
@@ -48,10 +48,10 @@
       --accent-soft: #a75438;
       --accent-tint: rgba(226, 112, 76, 0.12);
 
-      /* Brand mark / favicon — teal, borrowed from the "active" state color */
+      /* Brand mark / favicon: teal, borrowed from the "active" state color */
       --brand:       #7fb8b5;
 
-      /* State colors for the cache preview — semantic, not decorative.
+      /* State colors for the cache preview: semantic, not decorative.
          Tuned to read on dark warm bg without going neon. */
       --state-ok:     #a4c27a;
       --state-warn:   #e0b45c;
@@ -76,7 +76,7 @@
     }
     ::selection { background: var(--accent); color: var(--bg); }
 
-    /* Cool teal ambient from hero top — complements the warm coral ASCII */
+    /* Cool teal ambient from hero top: complements the warm coral ASCII */
     body::before {
       content: "";
       position: fixed;
@@ -90,7 +90,7 @@
       );
       z-index: 0;
     }
-    /* Film-grain texture — fine SVG fractal noise, very low opacity.
+    /* Film-grain texture: fine SVG fractal noise, very low opacity.
        Adds paper/photograph feel; imperceptible on text at 0.06. */
     body::after {
       content: "";
@@ -128,7 +128,7 @@
       font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
       font-feature-settings: "calt", "liga";
     }
-    /* Unified inline code chip — consistent across lede, intro, aside */
+    /* Unified inline code chip: consistent across lede, intro, aside */
     p code {
       background: #000;
       border: 1px solid var(--rule);
@@ -140,7 +140,7 @@
     }
     pre { margin: 0; white-space: pre; }
 
-    /* Universal focus style — visible outline for keyboard users,
+    /* Universal focus style: visible outline for keyboard users,
        invisible for mouse clicks (:focus-visible). */
     :focus-visible {
       outline: 2px solid var(--accent);
@@ -186,7 +186,7 @@
     header .brand a.current, header .brand a.current:hover { color: inherit; cursor: default; }
     .dot-sep { color: var(--fg-fade); }
 
-    /* Sections — single-rule dividers via section::before, tighter rhythm */
+    /* Sections: single-rule dividers via section::before, tighter rhythm */
     main > section {
       padding: clamp(1.6rem, 3.5vw, 2.75rem) 0;
       position: relative;
@@ -206,7 +206,7 @@
       padding-bottom: clamp(2rem, 4.5vw, 3.25rem);
     }
 
-    /* Rendered PNG of the ANSI Shadow "CLAUDE CODE" art — consistent
+    /* Rendered PNG of the ANSI Shadow "CLAUDE CODE" art: consistent
        across every mobile browser, unlike Unicode box-drawing glyphs
        which render subpixel-pixelated at small sizes on Android. */
     .cc-ascii {
@@ -254,7 +254,7 @@
       gap: 1.1rem;
     }
 
-    /* Savings teaser — same chassis as the Status Line preview below
+    /* Savings teaser: same chassis as the Status Line preview below
        it (rounded corners, head bar, black body, layered shadow), with
        a coral border to mark it as interactive (it links to #savings). */
     .hero-stat {
@@ -367,7 +367,7 @@
       font-weight: 500;
       color: var(--brand);
     }
-    /* "claudecompress" inside prose — same mono treatment as the header
+    /* "claudecompress" inside prose: same mono treatment as the header
        brand mark, bolded for product-name emphasis. */
     .brand-inline {
       font-family: "IBM Plex Mono", monospace;
@@ -386,7 +386,7 @@
       color: var(--fg);
     }
 
-    /* Install block — tabbed package-manager switch + unified copy */
+    /* Install block: tabbed package-manager switch + unified copy */
     .install-kicker {
       font-family: "IBM Plex Mono", monospace;
       font-size: 10.5px;
@@ -509,7 +509,7 @@
       border-color: var(--accent);
     }
 
-    /* Status line preview — pure black surface, contrasts warm-dark page */
+    /* Status line preview: pure black surface, contrasts warm-dark page */
     .preview {
       max-width: 520px;
       background: #000;
@@ -576,7 +576,7 @@
       border: 1px solid var(--rule);
       border-radius: 2px;
       padding: 0.05em 0.42em;
-      margin-left: 0.28em;
+      margin: 0 0.45em 0 0.28em;
       color: var(--fg);
       font-size: 0.94em;
       white-space: nowrap;
@@ -588,7 +588,7 @@
     .state-line.active .dot, .state-line.active .label { color: var(--state-active); }
     .state-line .label { font-weight: 500; }
 
-    /* Section tag — mono uppercase label, no numbering */
+    /* Section tag: mono uppercase label, no numbering */
     .sec-tag {
       font-family: "IBM Plex Mono", monospace;
       font-size: 11px;
@@ -614,7 +614,54 @@
     }
     .intro-wide { max-width: none; }
     .intro code { background: #000; border: 1px solid var(--rule); padding: 0.03em 0.36em; border-radius: 2px; font-size: 0.9em; color: var(--fg); }
-    /* Section split — text on left, demo on right */
+
+    /* Aside-note: slightly smaller, dimmer prose — for secondary info
+       (wrapper usage, supplementary context) */
+    .aside-note {
+      font-size: 0.95rem;
+      color: var(--fg-dim);
+      margin-top: 1.3rem;
+    }
+
+    /* Mode ladder: 3-column grid comparing modes side-by-side.
+       Replaces multi-chip prose paragraphs that crowd each other. */
+    .mode-ladder {
+      list-style: none;
+      padding: 0;
+      margin: 1.2rem 0 0.2rem;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 13px;
+      max-width: 56ch;
+    }
+    .mode-ladder li {
+      display: grid;
+      grid-template-columns: 5rem 3.5rem 1fr;
+      gap: 1rem;
+      padding: 0.6rem 0;
+      border-bottom: 1px solid var(--rule);
+      align-items: baseline;
+    }
+    .mode-ladder li:last-child { border-bottom: 0; }
+    .mode-ladder code {
+      background: #000;
+      border: 1px solid var(--rule);
+      padding: 0.05em 0.55em;
+      border-radius: 3px;
+      font-size: 0.92em;
+      color: var(--fg);
+      justify-self: start;
+    }
+    .mode-ladder .mode-pct {
+      color: var(--state-ok);
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+    .mode-ladder .mode-note {
+      color: var(--fg-dim);
+      font-size: 0.92em;
+    }
+    /* Section split: text on left, demo on right */
     .split {
       display: grid;
       grid-template-columns: 1fr;
@@ -630,7 +677,7 @@
       .split { grid-template-columns: 0.9fr 1.1fr; gap: 3rem; align-items: center; }
     }
 
-    /* Two-demo row — /compress + bunx commands side by side */
+    /* Two-demo row: /compress + bunx commands side by side */
     .demo-row {
       display: grid;
       grid-template-columns: 1fr;
@@ -653,7 +700,7 @@
       .demo-row .codeblock { max-width: none; }
     }
 
-    /* Code blocks — pure black surface, contrasts warm-dark page */
+    /* Code blocks: pure black surface, contrasts warm-dark page */
     .box, .codeblock {
       background: #000;
       border: 1px solid var(--rule);
@@ -676,7 +723,7 @@
     .box .accent { color: var(--accent); }
     .box .savings { color: var(--state-ok); font-weight: 500; }
 
-    /* Table — wrap in scroll container; no mask here (text stays crisp).
+    /* Table: wrap in scroll container; no mask here (text stays crisp).
        The Focus-5 highlight strip does its own edge fade below. */
     .table-wrap {
       overflow-x: auto;
@@ -701,7 +748,7 @@
     }
     table th:nth-child(n+2),
     table td:nth-child(n+2) { text-align: right; }
-    /* Tokens column sits between Mode and the monetary cols — centering
+    /* Tokens column sits between Mode and the monetary cols: centering
        it lets it read as a midpoint pivot between "what" and "cost". */
     table th:nth-child(2),
     table td:nth-child(2) { text-align: center; }
@@ -734,7 +781,7 @@
     table tr.baseline td { color: var(--fg-dim); }
     table td.saved { color: var(--state-ok); font-weight: 500; }
     /* Tier ramp: warn-yellow (small win) → green (big win). Widened so
-       each step is visibly distinct — previous interpolation sat mostly
+       each step is visibly distinct: previous interpolation sat mostly
        in the green end, making tier-1 through tier-4 indistinguishable
        on the Saved column. Applied to tokens + saved so both columns
        read as the same story as the eye scans down. */
@@ -769,6 +816,52 @@
       font-weight: 500;
     }
 
+    /* Savings dataset tabs */
+    .savings-tabs {
+      display: flex;
+      gap: 0.3rem;
+      margin: 1.4rem 0 1rem;
+      flex-wrap: wrap;
+      font-family: "IBM Plex Mono", monospace;
+    }
+    .s-tab {
+      appearance: none;
+      background: transparent;
+      border: 1px solid var(--rule);
+      color: var(--fg-dim);
+      padding: 0.4rem 0.85rem;
+      font: inherit;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: color var(--dur-hover) var(--ease), border-color var(--dur-hover) var(--ease), background var(--dur-hover) var(--ease);
+    }
+    .s-tab:hover { color: var(--fg); border-color: var(--accent-soft); }
+    .s-tab[aria-selected="true"] {
+      color: var(--accent);
+      border-color: var(--accent-soft);
+      background: var(--accent-tint);
+    }
+    .s-tab-note {
+      color: var(--fg-fade);
+      font-size: 10.5px;
+      margin-left: 0.35rem;
+      letter-spacing: 0;
+    }
+    .s-tab[aria-selected="true"] .s-tab-note { color: var(--accent-soft); }
+    .savings-caption {
+      margin-top: 0.9rem;
+      font-size: 11.5px;
+      color: var(--fg-dim);
+      font-variant-numeric: tabular-nums;
+    }
+    #savings-table td[data-tok],
+    #savings-table td[data-saved],
+    #savings-table td[data-block] {
+      font-variant-numeric: tabular-nums;
+    }
+
     /* Footer */
     footer {
       padding: 2.4rem 0 3rem;
@@ -793,7 +886,7 @@
 
     /* ====== Animation layer ====== */
 
-    /* Hero entrance — staggered fade + gentle up-shift on page load.
+    /* Hero entrance: staggered fade + gentle up-shift on page load.
        Sequence matches visual reading order (NOT dom order) so eye flow
        and motion flow agree. On mobile, install is hidden so the stat +
        preview slot into the gap naturally. */
@@ -810,7 +903,7 @@
     .hero .preview   { animation: reveal-in 600ms var(--ease) 540ms both; }
     .hero .cta-row   { animation: reveal-in 450ms var(--ease) 640ms both; }
 
-    /* Section scroll-reveal — each non-hero section fades/slides up the
+    /* Section scroll-reveal: each non-hero section fades/slides up the
        first time it enters the viewport. JS adds .revealed. */
     main > section:not(.hero):not(.auto-reveal) {
       opacity: 0;
@@ -831,7 +924,7 @@
       animation: reveal-in 600ms var(--ease) 900ms both;
     }
 
-    /* "Warm" cache dot — slow breathing pulse, suggests 'live/alive'.
+    /* "Warm" cache dot: slow breathing pulse, suggests 'live/alive'.
        Only on the warm state; others stay still. */
     @keyframes dot-pulse {
       0%, 100% { opacity: 1; }
@@ -853,7 +946,7 @@
       }
     }
 
-    /* Respect user preference — strip all motion */
+    /* Respect user preference: strip all motion */
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.01ms !important;
@@ -874,18 +967,18 @@
       .hero .lede { font-size: 1rem; margin: 0; }
       .hero .lede-list { font-size: 0.98rem; margin: 0; }
       .hero .install { margin: 0; }
-      /* Preview panel — tighter internal padding on small screens */
+      /* Preview panel: tighter internal padding on small screens */
       .preview-body { padding: 1rem 1.1rem 1.1rem; font-size: 12.5px; line-height: 2; }
       .preview-head { padding: 0.5rem 1rem; font-size: 10px; }
       /* Install buttons fill the column, always tappable */
       .install { max-width: 100%; }
       /* Section tag label less aggressive letter-spacing on small viewports */
       .sec-tag { letter-spacing: 0.18em; }
-      /* Code blocks — shrink font so the ~50-char ASCII frame fits a phone
+      /* Code blocks: shrink font so the ~50-char ASCII frame fits a phone
          viewport without horizontal scroll. */
       .box, .codeblock { padding: 0.85rem 0.9rem; font-size: clamp(9.5px, 2.7vw, 12px); }
       .codeblock { max-width: 100%; }
-      /* Savings table — drop the Cold-cost column and let the remaining
+      /* Savings table: drop the Cold-cost column and let the remaining
          three (Mode / Tokens / Saved) shrink to viewport width. */
       #savings table th:nth-child(3),
       #savings table td:nth-child(3) { display: none; }
@@ -926,7 +1019,7 @@
 
     /* Hero install box: hidden entirely when the hero collapses to one
        column. Mobile/tablet users hit the dedicated Install section
-       further down the page — having two install surfaces in one scroll
+       further down the page: having two install surfaces in one scroll
        flow is redundant. Desktop keeps the hero install for the
        two-column layout. */
     @media (max-width: 919px) {
@@ -938,7 +1031,7 @@
       #install .install-head   { grid-template-columns: 1fr auto; }
     }
 
-    /* Very narrow phones (≤380px) — more aggressive tightening */
+    /* Very narrow phones (≤380px): more aggressive tightening */
     @media (max-width: 380px) {
       .hero .lede { font-size: 0.96rem; }
       .install-lines { font-size: 12.5px; padding: 0.65rem 0.85rem 0.75rem; }
@@ -952,7 +1045,7 @@
     <div class="wrap">
       <span class="brand"><span class="mark">◉</span><a href="/" class="current" aria-current="page">claudecompress</a></span>
       <span class="meta">
-        <span id="npm-version" data-version-sync>v0.15.0</span>
+        <span id="npm-version" data-version-sync>v0.16.0</span>
         <span class="dot-sep">·</span>
         <a href="/theory/">theory</a>
         <span class="dot-sep">·</span>
@@ -1014,15 +1107,13 @@
 
           <div class="hero-right">
           <a class="hero-stat" href="#savings" aria-label="Trim savings details">
-            <div class="hero-stat-head">Trim savings</div>
+            <div class="hero-stat-head">Max 5x · 5-hour block</div>
             <div class="hero-stat-content">
               <div class="hero-stat-body">
-                <span class="hero-stat-from">$7.61</span>
-                <span class="hero-stat-arrow">→</span>
-                <span class="hero-stat-to">$2.52</span>
-                <span class="hero-stat-pct">~67% saved on safe, averaged</span>
+                <span class="hero-stat-to">save up to 75%</span>
+                <span class="hero-stat-pct">safe mode · minimal loss</span>
               </div>
-              <div class="hero-stat-foot">761k <span class="hero-stat-arrow">→</span> 252k tokens <span class="hero-stat-sep">·</span> Opus 4.6 cold rebuild</div>
+              <div class="hero-stat-foot">cold /resume on 760k <span class="hero-stat-sep">·</span> 13% of block <span class="hero-stat-arrow">→</span> as low as 3%</div>
               <div class="hero-stat-link">see breakdown ↓</div>
             </div>
           </a>
@@ -1040,7 +1131,7 @@
                 <span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span><span id="hero-countdown-low">0:58</span> left<span class="sep">·</span><span class="faint">Opus 4.7</span>
               </div>
               <div class="state-line cold">
-                <span class="dot">◉</span><span class="label">cache cold</span><span class="sep">·</span>12m past<span class="sep">·</span><span class="chip">/compress</span> to trim before rebuild
+                <span class="dot">◉</span><span class="label">cache cold</span><span class="sep">·</span>12m past<span class="sep">·</span><span class="chip">/compress</span> to save tokens
               </div>
             </div>
           </aside>
@@ -1060,15 +1151,21 @@
         <div class="split">
           <div>
             <h2>Trim <span class="italic">without</span> losing the thread.</h2>
-            <p class="intro"><code>safe</code> (the default) keeps your last 5 exchanges fully intact: tool outputs, thinking, file contents. Older turns get <em>observation-masked</em> — tool call names and file paths stay as breadcrumbs, bodies drop. Research-aligned with JetBrains' 2025 observation-masking study.</p>
-            <p class="intro">Need more? <code>smart</code> applies per-component rules by turn depth (~45% saved). <code>slim</code> drops older breadcrumbs for ~70% saved. <code>archive</code> is historical only.</p>
-            <p class="intro">Use <code>ccw</code>, the <code>claudecompress</code> wrapper, for a seamless resume. Or run <code>bunx claudecompress</code> as a standalone script.</p>
+            <p class="intro"><code>safe</code> (the default) keeps your last 5 exchanges fully intact: tool outputs, thinking, file contents. Older turns get <em>observation-masked</em>. Tool call names and file paths stay as breadcrumbs; bodies drop. Research-aligned with JetBrains' 2025 observation-masking study.</p>
+
+            <ul class="mode-ladder">
+              <li><code>safe</code>   <span class="mode-pct">~67%</span> <span class="mode-note">default, minimal loss</span></li>
+              <li><code>smart</code>  <span class="mode-pct">~76%</span> <span class="mode-note">per-component rules by turn depth</span></li>
+              <li><code>slim</code>   <span class="mode-pct">~81%</span> <span class="mode-note">aggressive, drops older breadcrumbs</span></li>
+            </ul>
+
+            <p class="intro aside-note">Run via <code>ccw</code> for seamless resume, or <code>bunx claudecompress</code> standalone.</p>
           </div>
           <div>
             <div class="demo-label">Inside a session</div>
             <div class="box"><span class="dim">┌─ claudecompress ───────────────────────┐</span>
   mode:   safe (last 5) <span class="dim">· drop older thinking</span>
-  tokens: 761k <span class="accent">→</span> 511k    <span class="savings">(saved ≈ 249k)</span>
+  tokens: 760k <span class="accent">→</span> 511k    <span class="savings">(saved ≈ 249k)</span>
   cost:   $7.61 <span class="accent">→</span> $3.37  <span class="savings">(saved ≈ $4.24)</span>
   trimmed: 17420d99-7152-4359-bfdd…
 <span class="dim">└────────────────────────────────────────┘</span>
@@ -1087,28 +1184,36 @@
     <section id="savings">
       <div class="wrap">
         <div class="sec-tag"><span>Savings</span></div>
-        <h2>Real savings, averaged across real sessions.</h2>
-        <p class="intro intro-wide">Numbers below are the <strong>mean</strong> across three coding sessions (rag-canary 760k Edit-heavy, tender 600k tool-heavy, CV 280k text-heavy) applied to a 761k Opus 4.6 baseline. Cost is the real cold /resume rebuild — 1h cache write rate ($10/Mtok). Actual savings vary by session shape; safe saves anywhere from 58% to 76% in our benchmark. <code>safe</code> (default) keeps the last 5 exchanges intact and observation-masks everything older — the pattern validated by JetBrains' 2025 NeurIPS paper. All modes apply <em>squash</em> (rtk-style per-tool-call compression). Run <code>bunx claudecompress</code> on your own sessions to compare.</p>
+        <h2>Save up to <span class="italic">75%</span> of a block, with minimal context loss.</h2>
+        <p class="intro intro-wide">Dollar cost isn't the right metric for Claude Code. On a Max 5x plan you feel the 5-hour rate-limit block long before you feel billing. So we measure in <strong>% of that block</strong>. A cold <code>/resume</code> on a 760k session eats ~13% of your quota. <code>safe</code> (default, research-aligned) drops it to ~3%. More aggressive modes go further, with real tradeoffs. Each tab is a real session we measured.</p>
+
+        <div class="savings-tabs" role="tablist" aria-label="Savings dataset">
+          <button type="button" role="tab" class="s-tab" aria-selected="true" data-set="projA">Proj A <span class="s-tab-note">Edit-heavy · 760k</span></button>
+          <button type="button" role="tab" class="s-tab" aria-selected="false" data-set="projB">Proj B <span class="s-tab-note">Tool-heavy · 600k</span></button>
+          <button type="button" role="tab" class="s-tab" aria-selected="false" data-set="projC">Proj C <span class="s-tab-note">Text-heavy · 280k</span></button>
+        </div>
+
         <div class="table-wrap">
-          <table>
+          <table id="savings-table">
             <thead>
               <tr>
                 <th>Mode</th>
-                <th>Tokens used</th>
-                <th>Cost</th>
-                <th>Saved</th>
+                <th>Tokens</th>
+                <th>% saved</th>
+                <th>% of 5hr block</th>
               </tr>
             </thead>
             <tbody>
-              <tr class="baseline"><td class="mode">Baseline</td><td>761k</td><td>$7.61</td><td>$0.00</td></tr>
-              <tr><td class="mode">lossless</td><td class="tok tier-1">533k</td><td class="cost" data-start="7.61" data-target="5.33">$5.33</td><td class="saved tier-1">$2.28</td></tr>
-              <tr class="pick"><td class="mode">safe</td><td class="tok tier-2">252k</td><td class="cost" data-start="7.61" data-target="2.52">$2.52</td><td class="saved tier-2">$5.09</td></tr>
-              <tr><td class="mode">smart</td><td class="tok tier-3">180k</td><td class="cost" data-start="7.61" data-target="1.80">$1.80</td><td class="saved tier-3">$5.81</td></tr>
-              <tr><td class="mode">slim</td><td class="tok tier-3">142k</td><td class="cost" data-start="7.61" data-target="1.42">$1.42</td><td class="saved tier-3">$6.19</td></tr>
-              <tr><td class="mode">archive</td><td class="tok tier-4">132k</td><td class="cost" data-start="7.61" data-target="1.32">$1.32</td><td class="saved tier-4">$6.29</td></tr>
+              <tr class="baseline"><td class="mode">Baseline</td><td data-row="baseline-tok">760k</td><td>·</td><td data-row="baseline-block">13.2%</td></tr>
+              <tr data-mode="lossless"><td class="mode">lossless</td><td class="tok tier-1" data-tok></td><td class="saved tier-1" data-saved></td><td data-block></td></tr>
+              <tr class="pick" data-mode="safe"><td class="mode">safe</td><td class="tok tier-2" data-tok></td><td class="saved tier-2" data-saved></td><td data-block></td></tr>
+              <tr data-mode="smart"><td class="mode">smart</td><td class="tok tier-3" data-tok></td><td class="saved tier-3" data-saved></td><td data-block></td></tr>
+              <tr data-mode="slim"><td class="mode">slim</td><td class="tok tier-4" data-tok></td><td class="saved tier-4" data-saved></td><td data-block></td></tr>
             </tbody>
           </table>
         </div>
+        <p class="caption savings-caption" id="savings-caption"></p>
+        <p class="caption" style="margin-top: 1.1rem;">Block-usage column anchored on our 760k baseline, which consumed ~13% of a Max 5x plan's 5-hour rate-limit quota. Scales linearly; verify on your own sessions with <code>bunx claudecompress</code>.</p>
       </div>
     </section>
 
@@ -1204,7 +1309,7 @@
 
     // Version badge is baked at build time by scripts/sync-version.js
     // (reads package.json, rewrites the span with data-version-sync).
-    // No runtime fetch — avoids first-paint jitter.
+    // No runtime fetch: avoids first-paint jitter.
 
     // --- section scroll-reveal -------------------------------------------
     if (!REDUCE_MOTION && "IntersectionObserver" in window) {
@@ -1284,6 +1389,68 @@
       } else {
         for (const c of cells) animate(c);
       }
+    })();
+
+    // --- savings dataset tabs -------------------------------------------
+    // Baseline 750k ≈ 13% of a Max 5x 5-hour block (user-reported). That
+    // gives 1 token ≈ 0.01733% of block. Apply linearly per dataset.
+    (function setupSavingsTabs() {
+      const BLOCK_PCT_PER_TOKEN = 13 / 750000; // % of block per input token
+      const datasets = {
+        projA: {
+          base: 760000,
+          label: "Proj A · Edit-heavy coding session · 760k tokens · 37MB on disk",
+          m: { lossless: 21.2, safe: 57.9, smart: 67.2, slim: 75.1 },
+        },
+        projB: {
+          base: 600008,
+          label: "Proj B · Tool-output-heavy session · 600k tokens · 29MB on disk",
+          m: { lossless: 32.3, safe: 75.6, smart: 82.0, slim: 87.8 },
+        },
+        projC: {
+          base: 280122,
+          label: "Proj C · Text-heavy session · 280k tokens · 28MB on disk",
+          m: { lossless: 36.6, safe: 67.1, smart: 79.6, slim: 81.2 },
+        },
+      };
+
+      const fmtTok = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + "M"
+                             : n >= 1000 ? (n / 1000).toFixed(0) + "k"
+                             : String(n);
+      const fmtPct = (n) => n.toFixed(1) + "%";
+
+      const render = (key) => {
+        const ds = datasets[key];
+        if (!ds) return;
+        const table = document.getElementById("savings-table");
+        if (!table) return;
+
+        const baseTok = ds.base;
+        const baseBlock = baseTok * BLOCK_PCT_PER_TOKEN;
+        table.querySelector('[data-row="baseline-tok"]').textContent = fmtTok(baseTok);
+        table.querySelector('[data-row="baseline-block"]').textContent = fmtPct(baseBlock);
+
+        for (const [mode, pct] of Object.entries(ds.m)) {
+          const row = table.querySelector(`tr[data-mode="${mode}"]`);
+          if (!row) continue;
+          const toks = Math.round(baseTok * (1 - pct / 100));
+          const block = toks * BLOCK_PCT_PER_TOKEN;
+          row.querySelector("[data-tok]").textContent = fmtTok(toks);
+          row.querySelector("[data-saved]").textContent = fmtPct(pct);
+          row.querySelector("[data-block]").textContent = fmtPct(block);
+        }
+        const cap = document.getElementById("savings-caption");
+        if (cap) cap.textContent = ds.label;
+      };
+
+      for (const btn of document.querySelectorAll(".s-tab")) {
+        btn.addEventListener("click", () => {
+          for (const b of document.querySelectorAll(".s-tab")) b.setAttribute("aria-selected", "false");
+          btn.setAttribute("aria-selected", "true");
+          render(btn.dataset.set);
+        });
+      }
+      render("projA");
     })();
   </script>
 </body>

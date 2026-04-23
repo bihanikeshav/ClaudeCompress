@@ -27,7 +27,7 @@ States:
 ```
 ◉ cache warm · 5m · 4:32 left · Opus 4.7
 ◉ cache warm · 5m · 0:58 left · Opus 4.7
-○ cache cold · 12m past · /compress to trim before rebuild
+○ cache cold · 12m past · /compress to save tokens
 ◉ cache active · agent working · Opus 4.7
 ◉ new session · cache not yet seeded
 ```
@@ -55,7 +55,6 @@ Type `/compress` in any session. The hook trims the active session's JSONL and p
 /compress safe 15       # keep a wider recent window
 /compress smart         # per-component rules — middle ground (~45% saved)
 /compress slim          # aggressive — drops older tool_use breadcrumbs (~73% saved)
-/compress archive       # historical only — dialog-only throughout (~84% saved)
 /compress force         # override cache-warm refusal
 ```
 
@@ -64,7 +63,7 @@ Hook output:
 ```
 ┌─ claudecompress ────────────────────────────────────────┐
   mode:   safe (last 5) · drop thinking · squash (outputs+inputs)
-  tokens: 761k → 337k      (saved ≈ 424k)
+  tokens: 760k → 337k      (saved ≈ 424k)
   cost:   $7.61 → $3.37    (saved ≈ $4.24)   [Opus 4.6 · 1h cache cold rebuild]
   trimmed session: 17420d99-7152-4359-bfdd-34c2cefe77e3
 └─────────────────────────────────────────────────────────┘
@@ -155,7 +154,7 @@ CCW_CLAUDE_CMD=claude-me ccw
 
 ## Modes
 
-Four modes, measured on a 761k-token Opus 4.6 session (153 user turns):
+Four modes, measured on a 760k-token Opus 4.6 session (153 user turns):
 
 | Mode | % saved | $ saved | Quality risk | What it does |
 |---|---|---|---|---|
@@ -163,7 +162,6 @@ Four modes, measured on a 761k-token Opus 4.6 session (153 user turns):
 | ⭐ **safe** (default, N=5) | 55.7% | $4.24 | Low | keep last N turns verbatim; observation-mask older + compress Edit/Write diffs |
 | **smart** | 66.9% | $5.09 | Low-Med | per-component rules by turn depth; tool_use skeleton survives always |
 | **slim** (N=5) | 72.8% | $5.54 | Med | keep last N; older turns become dialog-only trail (loses breadcrumbs) |
-| **archive** | 83.5% | $6.35 | High | historical only — drops everything structural, user+assistant text only |
 
 **Squash** is applied in every mode. Two layers:
 

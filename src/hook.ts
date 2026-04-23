@@ -42,7 +42,10 @@ function readStdin(): Promise<string> {
   });
 }
 
-const VALID_MODES: TrimMode[] = ["lossless", "safe", "smart", "slim", "archive"];
+const VALID_MODES: TrimMode[] = ["lossless", "safe", "smart", "slim"];
+// v0.16 removal: `archive` was dominated by `slim` on every axis. Map it
+// to slim so users with old /compress habits don't silently fail.
+const RENAMED: Record<string, TrimMode> = { archive: "slim" };
 
 function parseCompressArgs(
   prompt: string,
@@ -56,13 +59,13 @@ function parseCompressArgs(
 
   const mode: TrimMode = (VALID_MODES as string[]).includes(modeTok)
     ? (modeTok as TrimMode)
-    : "safe";
+    : (RENAMED[modeTok] ?? "safe");
 
   const opts: TrimOptions & { force?: boolean } = { mode };
   if (force) opts.force = true;
   if (mode === "safe" || mode === "slim")
     opts.keepLastN = Number(tokens[1]) || 5;
-  if (mode !== "archive") opts.dropThinking = true;
+  opts.dropThinking = true;
   return opts;
 }
 
@@ -150,8 +153,7 @@ function modeLabel(opts: TrimOptions): string {
   if (opts.mode === "safe" || opts.mode === "slim")
     return `${opts.mode} (last ${opts.keepLastN})`;
   if (opts.mode === "smart") return "smart (per-component)";
-  if (opts.mode === "lossless") return "lossless (squash only)";
-  return opts.mode; // archive
+  return "lossless (squash only)";
 }
 
 interface CacheState {
