@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   copyFileSync,
+  unlinkSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
@@ -14,8 +15,11 @@ import { execSync } from "node:child_process";
 const CLAUDE_HOME = join(homedir(), ".claude");
 const SETTINGS_PATH = join(CLAUDE_HOME, "settings.json");
 const COMMAND_PATH = join(CLAUDE_HOME, "commands", "compress.md");
+const BREAK_COMMAND_PATH = join(CLAUDE_HOME, "commands", "break.md");
 
-const HOOK_MATCHER = "^/compress";
+// Hook matches both /compress and /break — the dispatcher in hook.ts
+// decides which flow to run based on the prompt content.
+const HOOK_MATCHER = "^/(compress|break)\\b";
 const HOOK_TAG = "claudecompress hook";
 const STATUSLINE_TAG = "claudecompress statusline";
 
@@ -146,15 +150,29 @@ function removeHook(settings: any): number {
 
 function writeSlashCommandFile(): void {
   mkdirSync(dirname(COMMAND_PATH), { recursive: true });
-  const body = `---
+  writeFileSync(
+    COMMAND_PATH,
+    `---
 description: Compress the active Claude Code session for cheaper cold /resume (handled by claudecompress hook).
 argument-hint: "[ultra|smart|focus|recency|truncate] [N]"
 ---
 
 Handled by the claudecompress UserPromptSubmit hook. If you are reading this
 message it means the hook did not run — see https://github.com/bihanikeshav/ClaudeCompress
-`;
-  writeFileSync(COMMAND_PATH, body);
+`,
+  );
+  writeFileSync(
+    BREAK_COMMAND_PATH,
+    `---
+description: Print a /loop command sized to the detected cache TTL so the prompt cache survives a break (handled by claudecompress hook).
+argument-hint: "[minutes]"
+---
+
+Handled by the claudecompress UserPromptSubmit hook. Type \`/break 15\` for a
+15-minute break. The hook prints the right \`/loop\` command for your current
+cache mode; copy + run it to keep the cache warm while you're away.
+`,
+  );
 }
 
 // Plan step-by-step: decide what the hook change would be without writing yet,
@@ -430,7 +448,13 @@ export async function uninstall(): Promise<void> {
     delete settings.statusLine;
     removedStatusline = true;
   }
-  if (removed === 0 && !removedStatusline) {
+  let removedCommands = 0;
+  for (const p2 of [COMMAND_PATH, BREAK_COMMAND_PATH]) {
+    try {
+      if (existsSync(p2)) { unlinkSync(p2); removedCommands += 1; }
+    } catch {}
+  }
+  if (removed === 0 && !removedStatusline && removedCommands === 0) {
     p.log.info("No claudecompress hook or statusLine found.");
     return;
   }
@@ -441,5 +465,7 @@ export async function uninstall(): Promise<void> {
       `Removed ${removed} claudecompress hook entr${removed === 1 ? "y" : "ies"}.`,
     );
   if (removedStatusline) p.log.success("Removed claudecompress statusLine.");
+  if (removedCommands > 0)
+    p.log.success(`Removed ${removedCommands} slash command file${removedCommands === 1 ? "" : "s"}.`);
   p.outro(pc.green("Done."));
 }

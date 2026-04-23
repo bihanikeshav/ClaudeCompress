@@ -7,3 +7,5 @@ bun.lock
 .env
 .env.*
 launch-posts.md
+HANDOVER.md
+docs/theory-research.md

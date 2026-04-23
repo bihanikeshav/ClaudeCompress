@@ -1,0 +1,710 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Theory · claudecompress</title>
+  <meta name="description" content="Why trimming works. A research-backed analysis of context decay in coding sessions." />
+  <meta name="color-scheme" content="dark" />
+  <meta name="theme-color" content="#141311" />
+  <meta property="og:type" content="article" />
+  <meta property="og:title" content="claudecompress · theory" />
+  <meta property="og:description" content="Which parts of a Claude Code session matter, which decay, and how fast." />
+  <meta property="og:url" content="https://bihanikeshav.github.io/ClaudeCompress/theory.html" />
+  <meta property="og:image" content="https://bihanikeshav.github.io/ClaudeCompress/claude-code.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='10.5' fill='none' stroke='%237fb8b5' stroke-width='2.4'/><circle cx='16' cy='16' r='4.5' fill='%237fb8b5'/></svg>" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,0..100;1,9..144,300..900,0..100&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --ease:          cubic-bezier(0.16, 1, 0.3, 1);
+      --dur-hover:     180ms;
+      --bg:            #141311;
+      --rule:          #2c2a26;
+      --fg:            #ece4d0;
+      --fg-soft:       #c4b99f;
+      --fg-dim:        #877e69;
+      --fg-fade:       #564e40;
+      --accent:        #e2704c;
+      --accent-soft:   #a75438;
+      --accent-tint:   rgba(226, 112, 76, 0.12);
+      --brand:         #7fb8b5;
+      --state-ok:      #a4c27a;
+      --state-warn:    #e0b45c;
+      --state-err:     #d27564;
+      --state-active:  #7fb8b5;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { overflow-x: clip; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+      font-size: 17px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: "kern", "liga", "ss01";
+      text-rendering: optimizeLegibility;
+    }
+    ::selection { background: var(--accent); color: var(--bg); }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0 0 auto 0;
+      height: 70vh;
+      pointer-events: none;
+      background: radial-gradient(ellipse 85% 100% at 18% 0%, rgba(127, 184, 181, 0.13) 0%, rgba(127, 184, 181, 0) 55%);
+      z-index: 0;
+    }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.06;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.8 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+      background-size: 200px 200px;
+    }
+    body > * { position: relative; z-index: 1; }
+
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 clamp(1.15rem, 4vw, 3rem); }
+
+    h1, h2 {
+      font-family: "Fraunces", "Times New Roman", serif;
+      font-weight: 400;
+      letter-spacing: -0.022em;
+      line-height: 1.08;
+      margin: 0;
+      color: var(--fg);
+      font-variation-settings: "opsz" 144, "SOFT" 40;
+    }
+    h1 { font-size: clamp(2.1rem, 5vw, 3.8rem); font-weight: 380; letter-spacing: -0.028em; max-width: 22ch; }
+    h2 { font-size: clamp(1.4rem, 3.2vw, 2.2rem); font-weight: 440; max-width: 28ch; }
+    .italic { font-family: "Fraunces", serif; font-style: italic; font-weight: 380; font-variation-settings: "opsz" 72, "SOFT" 70; color: var(--brand); }
+    .accent { color: var(--accent); }
+
+    code, pre, .mono {
+      font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+      font-feature-settings: "calt", "liga";
+    }
+    p code, li code, td code {
+      background: #000;
+      border: 1px solid var(--rule);
+      padding: 0.05em 0.4em;
+      border-radius: 3px;
+      font-size: 0.88em;
+      color: var(--fg);
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+      border-radius: 2px;
+    }
+
+    header {
+      border-bottom: 1px solid var(--rule);
+      padding: 1rem 0;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12.5px;
+      color: var(--fg-dim);
+    }
+    header .wrap {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    header .brand {
+      color: var(--fg);
+      font-weight: 500;
+    }
+    header .brand .mark {
+      color: var(--brand);
+      font-weight: 600;
+      margin-right: 0.4em;
+    }
+    header .brand a { color: inherit; text-decoration: none; transition: color var(--dur-hover) var(--ease); }
+    header .brand a:hover { color: var(--accent); }
+    header .meta { display: flex; gap: 0.85rem; align-items: center; }
+    header a {
+      color: var(--fg-dim);
+      text-decoration: none;
+      transition: color var(--dur-hover) var(--ease);
+    }
+    header a:hover { color: var(--accent); }
+    header a.current { color: var(--fg); cursor: default; }
+    header a.current:hover { color: var(--fg); }
+    .dot-sep { color: var(--fg-fade); }
+
+    main > section {
+      padding: clamp(1.8rem, 4vw, 2.75rem) 0;
+      position: relative;
+    }
+    main > section + section::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: clamp(1.15rem, 4vw, 3rem);
+      right: clamp(1.15rem, 4vw, 3rem);
+      height: 1px;
+      background: var(--rule);
+    }
+
+    section.hero {
+      padding-top: clamp(2.5rem, 6vw, 4rem);
+      padding-bottom: clamp(1.8rem, 4vw, 2.75rem);
+    }
+    .kicker {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      color: var(--accent);
+      font-weight: 500;
+      margin: 0 0 1.2rem;
+    }
+    .hero .lede {
+      max-width: 56ch;
+      font-size: clamp(1.05rem, 1.3vw, 1.18rem);
+      color: var(--fg-soft);
+      line-height: 1.58;
+      margin: 1.4rem 0 0;
+    }
+
+    .sec-tag {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11px;
+      color: var(--fg-dim);
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      margin-bottom: 1.2rem;
+      font-weight: 500;
+    }
+    .intro {
+      max-width: 64ch;
+      color: var(--fg-soft);
+      margin: 0 0 1.2rem;
+      line-height: 1.65;
+      font-size: 1.02rem;
+    }
+    .intro em {
+      font-family: "Fraunces", serif;
+      font-style: italic;
+      color: var(--brand);
+      font-weight: 500;
+    }
+
+    blockquote {
+      margin: 1.6rem 0 1.8rem;
+      padding: 0.5rem 0 0.5rem 1.3rem;
+      border-left: 2px solid var(--accent-soft);
+      max-width: 70ch;
+      font-family: "Fraunces", serif;
+      font-style: italic;
+      font-size: clamp(1.1rem, 1.5vw, 1.25rem);
+      color: var(--fg);
+      line-height: 1.45;
+      font-variation-settings: "opsz" 72, "SOFT" 70;
+    }
+    blockquote cite {
+      display: block;
+      margin-top: 0.6rem;
+      font-family: "IBM Plex Mono", monospace;
+      font-style: normal;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+    }
+    blockquote cite a { color: var(--fg-dim); text-decoration: none; border-bottom: 1px solid transparent; transition: color var(--dur-hover) var(--ease), border-color var(--dur-hover) var(--ease); }
+    blockquote cite a:hover { color: var(--accent); border-color: var(--accent); }
+
+    .chart-wrap {
+      margin: 1.4rem 0 0.8rem;
+      padding: 1.3rem 1.2rem 1.1rem;
+      background: #000;
+      border: 1px solid var(--rule);
+      border-radius: 10px;
+      box-shadow:
+        0 8px 28px rgba(0, 0, 0, 0.5),
+        0 2px 6px rgba(0, 0, 0, 0.35),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+    .chart-head {
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      margin-bottom: 0.9rem;
+      padding-bottom: 0.55rem;
+      border-bottom: 1px solid var(--rule);
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .chart-head .x-axis-note { color: var(--fg-fade); text-transform: none; letter-spacing: 0.02em; font-style: italic; }
+    svg.chart {
+      width: 100%;
+      height: auto;
+      display: block;
+      font-family: "IBM Plex Mono", monospace;
+    }
+    svg.chart .grid { stroke: #1a1814; stroke-width: 1; }
+    svg.chart .axis { stroke: var(--rule); stroke-width: 1; }
+    svg.chart .tick-label { fill: var(--fg-fade); font-size: 10px; }
+    svg.chart .axis-label { fill: var(--fg-dim); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
+    svg.chart .line { fill: none; stroke-width: 1.8; }
+    svg.chart .dot { stroke-width: 0; }
+
+    .legend {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem 1.5rem;
+      margin-top: 0.9rem;
+      padding-top: 0.9rem;
+      border-top: 1px solid var(--rule);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+      color: var(--fg-soft);
+    }
+    @media (min-width: 700px) {
+      .legend { grid-template-columns: repeat(3, 1fr); }
+    }
+    .legend .item { display: flex; align-items: center; gap: 0.55rem; }
+    .legend .swatch {
+      width: 16px;
+      height: 2.4px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .legend .swatch.dashed {
+      background: transparent;
+      border-top: 2.4px dashed;
+    }
+    .legend .note { color: var(--fg-dim); font-size: 11px; }
+
+    .caption {
+      font-size: 0.9rem;
+      color: var(--fg-dim);
+      max-width: 68ch;
+      margin: 1rem 0 0;
+      line-height: 1.55;
+    }
+    .caption em { font-family: "Fraunces", serif; font-style: italic; color: var(--fg-soft); }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 1.4rem 0 0.6rem; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      min-width: 560px;
+    }
+    table th {
+      text-align: left;
+      padding: 0.65rem 0.9rem 0.8rem;
+      color: var(--fg-dim);
+      font-weight: 500;
+      font-size: 10.5px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--rule);
+    }
+    table th:not(:first-child), table td:not(:first-child) { text-align: right; }
+    table td {
+      padding: 0.65rem 0.9rem;
+      color: var(--fg-soft);
+      border-bottom: 1px solid var(--rule);
+    }
+    table tr:last-child td { border-bottom: 0; }
+    table td.mode-cell { color: var(--fg); }
+    table td.keeps { color: var(--state-ok); font-weight: 500; }
+    table td.trims { color: var(--state-warn); }
+    table td.drops { color: var(--accent); }
+
+    ul.prose {
+      max-width: 70ch;
+      padding-left: 0;
+      list-style: none;
+      color: var(--fg-soft);
+      margin: 0.6rem 0 0;
+    }
+    ul.prose li {
+      position: relative;
+      padding-left: 1.5rem;
+      margin-bottom: 0.65rem;
+      line-height: 1.55;
+    }
+    ul.prose li::before {
+      content: "-";
+      position: absolute;
+      left: 0;
+      color: var(--accent);
+      font-family: "IBM Plex Mono", monospace;
+    }
+
+    .refs {
+      font-size: 0.88rem;
+      color: var(--fg-soft);
+      columns: 1;
+      column-gap: 2rem;
+    }
+    @media (min-width: 820px) { .refs { columns: 2; } }
+    .refs ol { padding-left: 1.4rem; margin: 0; }
+    .refs li { margin: 0 0 0.55rem; line-height: 1.5; break-inside: avoid; }
+    .refs a { color: var(--accent-soft); text-decoration: none; border-bottom: 1px solid transparent; transition: color var(--dur-hover) var(--ease), border-color var(--dur-hover) var(--ease); }
+    .refs a:hover { color: var(--accent); border-color: var(--accent); }
+
+    .back-link {
+      display: inline-block;
+      margin-bottom: 1.2rem;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      color: var(--fg-dim);
+      text-decoration: none;
+      transition: color var(--dur-hover) var(--ease), transform var(--dur-hover) var(--ease);
+    }
+    .back-link:hover { color: var(--accent); transform: translateX(-2px); }
+
+    footer {
+      padding: 2.4rem 0 3rem;
+      border-top: 1px solid var(--rule);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 11.5px;
+      color: var(--fg-dim);
+    }
+    footer .wrap {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      flex-wrap: wrap;
+      gap: 0.8rem;
+    }
+    footer a {
+      color: var(--fg-dim);
+      text-decoration: none;
+      transition: color var(--dur-hover) var(--ease);
+    }
+    footer a:hover { color: var(--accent); }
+
+    @keyframes reveal-in {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .hero .kicker   { animation: reveal-in 500ms var(--ease)   0ms both; }
+    .hero h1        { animation: reveal-in 550ms var(--ease) 110ms both; }
+    .hero .lede     { animation: reveal-in 550ms var(--ease) 220ms both; }
+    main > section:not(.hero) {
+      opacity: 0;
+      transform: translateY(14px);
+      transition: opacity 500ms var(--ease), transform 500ms var(--ease);
+    }
+    main > section:not(.hero).revealed { opacity: 1; transform: translateY(0); }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+      main > section:not(.hero) { opacity: 1 !important; transform: none !important; }
+    }
+
+    @media (prefers-contrast: more) {
+      :root {
+        --fg-fade: #7a715e;
+        --fg-dim:  #b0a383;
+        --rule:    #454039;
+      }
+    }
+
+    @media (max-width: 640px) {
+      blockquote { font-size: 1.05rem; padding-left: 1.1rem; }
+      .chart-wrap { padding: 1rem 0.7rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <span class="brand"><span class="mark">◉</span><a href="index.html">claudecompress</a></span>
+      <span class="meta">
+        <span id="npm-version">v0.7.0</span>
+        <span class="dot-sep">·</span>
+        <a href="theory.html" class="current" aria-current="page">theory</a>
+        <span class="dot-sep">·</span>
+        <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
+        <span class="dot-sep">·</span>
+        <a href="https://www.npmjs.com/package/claudecompress">npm</a>
+      </span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="wrap">
+        <a class="back-link" href="index.html">← back</a>
+        <div class="kicker">Theory</div>
+        <h1>Why <span class="italic">trimming</span> works.</h1>
+        <p class="lede">User instructions stay relevant for hours. A file you read twenty turns ago is almost certainly stale. Most of a long session is <em>rederivable noise</em> that can be cut without the model losing the thread.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="sec-tag">Central finding</div>
+        <h2>Masking matches summarization. At half the cost.</h2>
+        <p class="intro">JetBrains Research ran a 2025 study on <strong>500 SWE-bench Verified tasks</strong> comparing two ways to shrink an agent's context: send the transcript through an LLM to summarize it, or replace old tool outputs with a short placeholder while keeping the tool name and arguments.</p>
+        <p class="intro">Option 2 won or tied on 4 of 5 model configurations. On Qwen3-Coder 480B, masking scored <strong>54.8% solve rate vs 53.8%</strong> for summarization while being <strong>52% cheaper</strong>. Summarization also caused <em>trajectory elongation</em>: agents ran 15% more turns because summaries smoothed over failure severity.</p>
+
+        <blockquote>
+          "The simple approach of observation masking wasn't just cheaper; it often matched or even slightly beat LLM summarization in solving benchmark tasks."
+          <cite><a href="https://arxiv.org/abs/2508.21433">Lindenbauer &amp; Fraser · JetBrains Research · 2025</a></cite>
+        </blockquote>
+
+        <p class="intro">This is the basis for claudecompress's <code>Redact</code> mode. Tool call structure survives. Bodies drop. When Claude needs the content again, it re-invokes the tool.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="sec-tag">Relevance decay</div>
+        <h2>Every component ages on its own curve.</h2>
+        <p class="intro">Relevance scored 0-100 at turn distance. Pulled from published research where available (JetBrains, Chroma, Anthropic docs), inferred from attention mechanics elsewhere.</p>
+
+        <div class="chart-wrap">
+          <div class="chart-head">
+            <span>Relevance vs turn distance</span>
+            <span class="x-axis-note">square-root scale — early turns get more room</span>
+          </div>
+
+          <svg class="chart" viewBox="0 0 800 380" role="img" aria-label="Relevance decay curves for context components across 100 turns">
+            <g>
+              <line class="grid" x1="60" y1="255" x2="780" y2="255" />
+              <line class="grid" x1="60" y1="180" x2="780" y2="180" />
+              <line class="grid" x1="60" y1="105" x2="780" y2="105" />
+              <line class="axis" x1="60" y1="30" x2="60" y2="330" />
+              <line class="axis" x1="60" y1="330" x2="780" y2="330" />
+            </g>
+
+            <g>
+              <text class="tick-label" x="50" y="35" text-anchor="end" dominant-baseline="middle">100</text>
+              <text class="tick-label" x="50" y="108" text-anchor="end" dominant-baseline="middle">75</text>
+              <text class="tick-label" x="50" y="183" text-anchor="end" dominant-baseline="middle">50</text>
+              <text class="tick-label" x="50" y="258" text-anchor="end" dominant-baseline="middle">25</text>
+              <text class="tick-label" x="50" y="333" text-anchor="end" dominant-baseline="middle">0</text>
+            </g>
+
+            <g>
+              <text class="tick-label" x="60"  y="348" text-anchor="middle">0</text>
+              <text class="tick-label" x="132" y="348" text-anchor="middle">1</text>
+              <text class="tick-label" x="162" y="348" text-anchor="middle">2</text>
+              <text class="tick-label" x="221" y="348" text-anchor="middle">5</text>
+              <text class="tick-label" x="288" y="348" text-anchor="middle">10</text>
+              <text class="tick-label" x="382" y="348" text-anchor="middle">20</text>
+              <text class="tick-label" x="569" y="348" text-anchor="middle">50</text>
+              <text class="tick-label" x="780" y="348" text-anchor="middle">100</text>
+            </g>
+
+            <text class="axis-label" x="60" y="18" text-anchor="start">Relevance</text>
+            <text class="axis-label" x="780" y="375" text-anchor="end">Turns ago</text>
+
+            <path class="line" stroke="#a4c27a"
+              d="M 60,45 L 132,45 L 162,75 L 186,84 L 221,105 L 254,135 L 288,150 L 345,180 L 382,204 L 454,216 L 569,240 L 684,264 L 780,276" />
+            <path class="line" stroke="#e0b45c"
+              d="M 60,75 L 132,75 L 162,165 L 186,174 L 221,195 L 254,246 L 288,270 L 345,285 L 382,300 L 454,309 L 569,321 L 684,324 L 780,324" />
+            <path class="line" stroke="#e2704c" stroke-width="2.2"
+              d="M 60,60 L 132,60 L 162,180 L 186,195 L 221,225 L 254,270 L 288,285 L 345,300 L 382,309 L 454,315 L 569,321 L 684,324 L 780,324" />
+            <path class="line" stroke="#7fb8b5"
+              d="M 60,150 L 132,150 L 162,180 L 186,186 L 221,204 L 254,225 L 288,240 L 345,255 L 382,270 L 454,279 L 569,294 L 684,309 L 780,318" />
+            <path class="line" stroke="#877e69"
+              d="M 60,105 L 132,105 L 162,240 L 186,255 L 221,270 L 254,306 L 288,315 L 345,321 L 382,324 L 454,324 L 569,327 L 684,330 L 780,330" />
+            <path class="line" stroke="#d27564" stroke-dasharray="5 4"
+              d="M 60,90 L 132,90 L 162,150 L 186,159 L 221,195 L 254,231 L 288,246 L 345,270 L 382,291 L 454,300 L 569,315 L 684,324 L 780,330" />
+
+            <g>
+              <circle class="dot" cx="60"  cy="45"  r="3" fill="#a4c27a" />
+              <circle class="dot" cx="288" cy="150" r="3" fill="#a4c27a" />
+              <circle class="dot" cx="780" cy="276" r="3" fill="#a4c27a" />
+              <circle class="dot" cx="60"  cy="60"  r="3.5" fill="#e2704c" />
+              <circle class="dot" cx="162" cy="180" r="3.5" fill="#e2704c" />
+              <circle class="dot" cx="288" cy="285" r="3.5" fill="#e2704c" />
+            </g>
+          </svg>
+
+          <div class="legend">
+            <div class="item"><span class="swatch" style="background:#a4c27a"></span><span>User text <span class="note">— slow decay</span></span></div>
+            <div class="item"><span class="swatch" style="background:#7fb8b5"></span><span>Tool use blocks <span class="note">— linear</span></span></div>
+            <div class="item"><span class="swatch" style="background:#e2704c"></span><span>Read results <span class="note">— steep exp</span></span></div>
+            <div class="item"><span class="swatch" style="background:#e0b45c"></span><span>Bash results <span class="note">— steep exp</span></span></div>
+            <div class="item"><span class="swatch" style="background:#877e69"></span><span>Grep / Glob <span class="note">— very steep</span></span></div>
+            <div class="item"><span class="swatch dashed" style="border-color:#d27564"></span><span>Thinking <span class="note">— model-dependent</span></span></div>
+          </div>
+        </div>
+
+        <p class="caption">User text is nearly irreplaceable. Tool outputs decay steeply. Thinking is dashed because the behavior flipped on <code>Opus 4.5+</code> — newer models preserve thinking between turns, older ones strip it. Curve shown reflects Opus 4.5+.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="sec-tag">The hierarchy</div>
+        <h2>What claudecompress keeps, what it drops.</h2>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Component</th>
+                <th>Turn 0-1</th>
+                <th>Turn 6-15</th>
+                <th>Turn 50+</th>
+                <th>Re-derivable</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="mode-cell">User text messages</td><td class="keeps">95</td><td>55</td><td>20</td><td>None</td></tr>
+              <tr><td class="mode-cell">Thinking (Opus 4.5+)</td><td class="keeps">80</td><td>30</td><td class="drops">5</td><td>High</td></tr>
+              <tr><td class="mode-cell">Tool use blocks</td><td>60</td><td>30</td><td class="drops">5</td><td>Medium</td></tr>
+              <tr><td class="mode-cell">Read results</td><td class="keeps">90</td><td class="trims">15</td><td class="drops">2</td><td>High</td></tr>
+              <tr><td class="mode-cell">Bash results</td><td class="keeps">85</td><td class="trims">20</td><td class="drops">2</td><td>High</td></tr>
+              <tr><td class="mode-cell">Grep / Glob</td><td>75</td><td class="drops">5</td><td class="drops">0</td><td>High</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="caption"><span style="color:#a4c27a">Green</span> = keep, <span style="color:#e0b45c">amber</span> = consider trimming, <span style="color:#e2704c">coral</span> = safe to compress.</p>
+
+        <ul class="prose" style="margin-top:1.5rem">
+          <li><strong>Focus 5 keeps the last 5 user turns verbatim</strong> — tool outputs, thinking, everything. Full working memory for recent state.</li>
+          <li><strong>Older turns become a dialog trail</strong> — user text, assistant text, tool call names and arguments. The breadcrumb survives.</li>
+          <li><strong>Raw bodies are dropped in older turns</strong> — file contents, bash output, search results. Re-invoke the tool when needed.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="sec-tag">Context rot</div>
+        <h2>More context isn't always better.</h2>
+        <p class="intro">Chroma Research's 2025 study across <strong>18 frontier models</strong> found that adding unrelated conversation history to a focused prompt dropped accuracy <strong>30-60%</strong> on LongMemEval. Claude models showed the most pronounced gap — not because they hallucinate, but because they abstain more under growing ambiguity.</p>
+
+        <blockquote>
+          "Dumb zone kicks in around ~40% context. Shoot to keep it under 40%, and if you get up to 60%, think about wrapping it up."
+          <cite><a href="https://howborisusesclaudecode.com/">Boris Cherny · Claude Code · Anthropic</a></cite>
+        </blockquote>
+
+        <p class="intro">Trimming isn't only a cost argument. A smaller session <em>performs better</em> than a bloated one because the signal-to-noise ratio affects attention allocation. The most expensive session is a full one that gives you the wrong answer.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="sec-tag">On thinking blocks</div>
+        <h2>A default that quietly flipped.</h2>
+        <p class="intro">Through Claude 4.4, the API stripped prior thinking blocks between turns — dropping them was free. Starting <code>Opus 4.5</code>, the default flipped: thinking blocks are preserved. There's an open <a href="https://github.com/anthropics/claude-code/issues/20249" style="color:var(--accent-soft)">Claude Code issue</a> flagging the documentation inconsistency.</p>
+        <p class="intro">claudecompress accounts for this by <em>always preserving thinking within the last N user turns</em> (Focus 5's window by default), even when drop-thinking is enabled. Older thinking still gets dropped — it's rarely load-bearing past the recent window — but recent thinking is never touched.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="sec-tag">Caveats</div>
+        <h2>What this theory doesn't prove.</h2>
+        <ul class="prose">
+          <li>No controlled A/B test on claudecompress specifically. The JetBrains observation-masking result uses a similar strategy on a different tool. Principles transfer; direct validation is still owed.</li>
+          <li><em>Lost in the Middle</em> (2023) tested GPT-3.5 and Claude 1.3. Opus 4.6 scores 78.3% on MRCR v2 at 1M tokens — much better, but the phenomenon persists, especially for Sonnet at extreme context lengths.</li>
+          <li>Scores mix published findings with logical inference. Treat them as informed starting points, not precise measurements. Re-derivability assumes tool access on resume.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="sec-tag">References</div>
+        <div class="refs">
+          <ol>
+            <li>Liu et al. 2023. <em>Lost in the Middle</em>. <a href="https://arxiv.org/abs/2307.03172">arXiv:2307.03172</a></li>
+            <li>Xiao et al. 2023. <em>Attention Sinks</em>. <a href="https://arxiv.org/abs/2309.17453">arXiv:2309.17453</a></li>
+            <li>Lindenbauer &amp; Fraser 2025. <em>The Complexity Trap: Observation Masking</em>. <a href="https://arxiv.org/abs/2508.21433">arXiv:2508.21433</a></li>
+            <li>Chroma 2025. <em>Context Rot</em>. <a href="https://www.trychroma.com/research/context-rot">chroma</a></li>
+            <li>Factory AI 2025. <em>Evaluating compression</em>. <a href="https://factory.ai/news/evaluating-compression">factory.ai</a></li>
+            <li>Anthropic. <em>Effective context engineering for AI agents</em>. <a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">anthropic.com</a></li>
+            <li>Anthropic. <em>Extended thinking</em>. <a href="https://platform.claude.com/docs/en/build-with-claude/extended-thinking">platform.claude.com</a></li>
+            <li>Anthropic. <em>Context editing</em>. <a href="https://platform.claude.com/docs/en/build-with-claude/context-editing">platform.claude.com</a></li>
+            <li>Boris Cherny. <em>How Boris uses Claude Code</em>. <a href="https://howborisusesclaudecode.com/">howborisusesclaudecode.com</a></li>
+            <li>Blake Crosley. <em>Context window management</em>. <a href="https://blakecrosley.com/blog/context-window-management">blakecrosley.com</a></li>
+            <li>MRCR v2 Leaderboard. <a href="https://llm-stats.com/benchmarks/mrcr-v2">llm-stats.com</a></li>
+            <li>SWE-bench Verified. <a href="https://www.swebench.com/">swebench.com</a></li>
+          </ol>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <span>MIT license</span>
+      <span>
+        <a href="index.html">home</a>
+        <span class="dot-sep">·</span>
+        <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
+        <span class="dot-sep">·</span>
+        <a href="https://www.npmjs.com/package/claudecompress">npm</a>
+        <span class="dot-sep">·</span>
+        <a href="https://github.com/bihanikeshav/ClaudeCompress/issues">issues</a>
+      </span>
+    </div>
+  </footer>
+
+  <script>
+    const REDUCE_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    (async () => {
+      const el = document.getElementById("npm-version");
+      if (!el) return;
+      try {
+        const r = await fetch("https://registry.npmjs.org/claudecompress/latest", { cache: "no-store" });
+        if (!r.ok) return;
+        const { version } = await r.json();
+        if (version) el.textContent = "v" + version;
+      } catch {}
+    })();
+
+    if (!REDUCE_MOTION && "IntersectionObserver" in window) {
+      const revealIO = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("revealed");
+            revealIO.unobserve(entry.target);
+          }
+        }
+      }, { threshold: 0.12, rootMargin: "0px 0px -60px 0px" });
+      for (const s of document.querySelectorAll("main > section:not(.hero)")) {
+        revealIO.observe(s);
+      }
+    } else {
+      for (const s of document.querySelectorAll("main > section:not(.hero)")) {
+        s.classList.add("revealed");
+      }
+    }
+  </script>
+</body>
+</html>

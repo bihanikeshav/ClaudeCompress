@@ -73,7 +73,38 @@ Hook output:
 
 Original JSONL is never touched. The trimmed sibling gets a fresh UUID and a `[TRIMMED by claudecompress]` prefix on the first user message, making it obvious in `/resume`.
 
-The running session can't be mutated from a hook; only `/compact` can, since it's in-process. So you Ctrl+C and `--resume` the new UUID, or use `ccw` (below) to skip that step.
+The running session can't be mutated from a hook; only `/compact` can, since it's in-process. Under `ccw` the hook auto-exits claude so the respawn loop picks up the trimmed session — you don't have to press Ctrl+C. Without `ccw`, press Ctrl+C twice and run the printed `--resume` command.
+
+**When cache is still warm, `/compress` refuses** and suggests `/compact` instead. `/compress` forces a resume and rebuilds the cache cold — that only pays off once the cache has already expired. While warm, `/compact` is the cheaper path: it shrinks context in place, no rebuild. Override with `/compress force` (or `/compress focus 5 force`) if you really want to trim a warm session.
+
+### Taking a break: `/break`
+
+Stepping away for a bit? `/break 15` prints the right `/loop` command to keep your prompt cache warm while you're gone.
+
+```
+/break           # 15 minutes (default)
+/break 30        # 30 minutes
+/break 120       # 2 hours (good for lunch on 1h cache)
+```
+
+Hook output:
+
+```
+┌─ claudecompress /break ─────────────────────────────────┐
+  break:      30 min
+  cache:      5m TTL
+  pings:      ~7 (every 4m30s)
+  cost/ping:  $2.28  (cache read · 760k tokens)
+  total:      ~$15.96
+└─────────────────────────────────────────────────────────┘
+  To hold the cache warm during your break, run:
+    /loop 4m30s .
+  Ctrl+C the loop when you're back.
+```
+
+Detects cache mode automatically (1h cache outlasts most breaks; 5m needs pings). If your cache will survive the break, `/break` tells you so — no pings needed.
+
+`/loop` is Claude Code's native scheduling primitive; `/break` just computes the right interval based on your current cache TTL and session size. Copy the printed command and run it.
 
 ### Any saved session: `bunx claudecompress`
 
@@ -94,7 +125,7 @@ Every trim is logged to `~/.claude/claudecompress/history.jsonl`. The interactiv
 
 ### `ccw`, the auto-resume wrapper
 
-After `/compress`, Ctrl+C, and `ccw` respawns `claude --resume <new-hash>` for you.
+Under `ccw`, `/compress` auto-exits the current session and `ccw` respawns `claude --resume <new-hash>` for you. No Ctrl+C needed.
 
 ```bash
 ccw                                    # same args as `claude`

@@ -6,8 +6,7 @@ import type { TrimOptions } from "./types.ts";
 import { applyRuleToText, matchRule } from "./rules.ts";
 
 const TRIM_MARKER = "[TRIMMED by claudecompress] ";
-const IMAGE_PLACEHOLDER = "[image stripped by claudecompress]";
-const REDACT_PLACEHOLDER = "[tool response redacted by claudecompress]";
+const REDACT_PLACEHOLDER = "";
 
 function redactToolResult(blk: any): any {
   const out: Record<string, unknown> = {
@@ -43,18 +42,16 @@ function truncateToolResult(blk: any, maxChars: number): any {
             `\n\n[... ${b.text.length - maxChars} chars trimmed]`,
         };
       }
-      if (b.type === "image") {
-        return { type: "text", text: IMAGE_PLACEHOLDER };
-      }
+      if (b.type === "image") return null;
       return b;
-    });
+    }).filter(Boolean);
     return { ...blk, content: newList };
   }
   return blk;
 }
 
-function stripImage(): any {
-  return { type: "text", text: IMAGE_PLACEHOLDER };
+function stripImage(): null {
+  return null;
 }
 
 function trimRecordRedact(rec: any, newSid: string, keepChars?: number): any | null {
@@ -71,7 +68,7 @@ function trimRecordRedact(rec: any, newSid: string, keepChars?: number): any | n
       }
       if (blk.type === "image") return stripImage();
       return blk;
-    });
+    }).filter(Boolean);
     out.message = { ...msg, content: newContent };
   }
   return out;
@@ -95,9 +92,9 @@ function smartTrimResult(blk: any, toolName: string | undefined): any {
         const nt = applyRuleToText(b.text, rule.action);
         return nt === b.text ? b : { ...b, text: nt };
       }
-      if (b.type === "image") return { type: "text", text: IMAGE_PLACEHOLDER };
+      if (b.type === "image") return null;
       return b;
-    });
+    }).filter(Boolean);
     return { ...blk, content: newList };
   }
   return blk;
@@ -128,7 +125,7 @@ function trimRecordSmart(
     }
     if (blk.type === "image") return stripImage();
     return blk;
-  });
+  }).filter(Boolean);
   out.message = { ...msg, content: newContent };
   return out;
 }
@@ -240,17 +237,14 @@ function findRecencyCutoffRecordIndex(path: string, keepLastN: number): number {
   return userTurnAtRecord[userTurnAtRecord.length - keepLastN];
 }
 
-function dropThinkingBlocks(rec: any): any {
+function dropThinkingBlocks(rec: any): any | null {
   const msg = rec?.message;
   if (!msg || typeof msg !== "object" || !Array.isArray(msg.content)) return rec;
   const filtered = msg.content.filter(
     (b: any) => !(b && typeof b === "object" && b.type === "thinking"),
   );
   if (filtered.length === msg.content.length) return rec;
-  if (filtered.length === 0) {
-    // Would leave an empty message — keep a tiny placeholder so API stays valid
-    filtered.push({ type: "text", text: "[thinking dropped]" });
-  }
+  if (filtered.length === 0) return null;
   return { ...rec, message: { ...msg, content: filtered } };
 }
 
@@ -275,6 +269,17 @@ export async function trimSession(
   const cutoffRecordIdx = needsCutoff
     ? findRecencyCutoffRecordIndex(inputPath, opts.keepLastN ?? 15)
     : 0;
+
+  // Preserve thinking blocks within the last N user turns regardless of mode.
+  // On Opus 4.5+, thinking blocks are preserved by default (see Anthropic's
+  // context editing docs). Dropping recent thinking would remove signal the
+  // model actively uses on the next turn. Default window: 5 user turns if
+  // the mode doesn't specify its own keepLastN.
+  const thinkingKeepN = opts.keepLastN ?? 5;
+  const thinkingCutoffIdx = opts.dropThinking && opts.mode !== "ultra"
+    ? findRecencyCutoffRecordIndex(inputPath, thinkingKeepN)
+    : 0;
+
   let recordIdx = -1;
 
   for await (const line of rl) {
@@ -331,7 +336,11 @@ export async function trimSession(
       if (!newRec) continue;
     }
     if (opts.dropThinking && opts.mode !== "ultra") {
-      newRec = dropThinkingBlocks(newRec);
+      const inThinkingWindow = recordIdx >= thinkingCutoffIdx;
+      if (!inThinkingWindow) {
+        newRec = dropThinkingBlocks(newRec);
+        if (!newRec) continue;
+      }
     }
     if (!marked && newRec.type === "user") {
       newRec = markFirstUser(newRec);
