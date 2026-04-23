@@ -50,21 +50,23 @@ Two entry points into the same trim engine.
 Type `/compress` in any session. The hook trims the active session's JSONL and prints a resume command.
 
 ```
-/compress               # Focus 5 (default) + drop thinking
-/compress focus 15      # keep more recent context
-/compress recency 10    # last 10 user turns verbatim, redact older
-/compress smart         # per-tool rules
-/compress ultra         # nuke it; dialog-only
-/compress truncate 500  # keep first 500 chars per tool_result
+/compress               # Recency 5 (default) — observation masking + last 5 verbatim
+/compress recency 15    # keep a wider recent window
+/compress focus 5       # aggressive — drops older tool_use breadcrumbs too
+/compress smart         # per-tool rules (Read heads/tails, Bash errors)
+/compress redact        # cleanup — drops ALL tool_result bodies incl recent
+/compress ultra         # nuclear — dialog only, archival
+/compress truncate 500  # manual — keep first 500 chars per tool_result
+/compress force         # override cache-warm refusal
 ```
 
 Hook output:
 
 ```
 ┌─ claudecompress ────────────────────────────────────────┐
-  mode:   focus (last 5) · dropped thinking
-  tokens: 761k → 217k       (saved ≈ 544k)
-  cost:   $22.83 → $6.51    (saved ≈ $16.32)  [Opus 4.6 · 200k+ tier]
+  mode:   recency (last 5) · drop thinking (outside last-N)
+  tokens: 761k → 511k       (saved ≈ 249k)
+  cost:   $22.83 → $15.35   (saved ≈ $7.48)  [Opus 4.6 · 200k+ tier]
   trimmed session: 17420d99-7152-4359-bfdd-34c2cefe77e3
 └─────────────────────────────────────────────────────────┘
   Exit this session (Ctrl+C), then run:
@@ -154,31 +156,26 @@ CCW_CLAUDE_CMD=claude-me ccw
 
 ## Modes
 
-| Mode | Weight | Behavior |
-|---|---|---|
-| **Redact** | medium | drop all tool_result bodies, keep full structure |
-| **Recency N** | medium | keep last N user turns verbatim (with their tool chains), redact older |
-| **Focus N** (default, N=5) | medium to heavy | dialog-only trail for older turns + last N user turns verbatim |
-| **Smart** | light | per-tool rules: Read heads/tails, Bash errors, full Edit/TodoWrite, redact WebFetch and heavy MCP responses |
-| **Ultra** | heavy | user + assistant text only; tools/thinking all dropped |
-| **Truncate N** | manual | keep first N chars of every tool_result |
+Measured on the same 761k-token Opus 4.6 session (153 user turns, 200k+ context tier):
 
-**N counts your user messages**, not JSONL records. Each time you send a message, everything the agent does in response (tool calls, tool results, thinking, reply) is one "user turn". `Focus 5` keeps the last 5 back-and-forths verbatim; anything before is compressed to a dialog-only trail.
+| Mode | % tokens saved | $ saved | Quality risk | Notes |
+|---|---|---|---|---|
+| **Smart** | 17.9% | $2.04 | Low | per-tool rules — Read heads/tails, Bash errors, full TodoWrite |
+| **Recency 15** | 26.7% | $3.04 | Low | observation masking + wider recent window |
+| ⭐ **Recency 5** (default) | 32.8% | $3.74 | Low | observation masking + last 5 verbatim — research-aligned |
+| **Redact** | 36.7% | $4.18 | ⚠ Med | drops ALL tool_result bodies **including recent** — use for cleanup not resume |
+| **Focus 15** | 57.1% | $6.52 | Med | aggressive; drops older `tool_use` breadcrumbs |
+| **Focus 5** | 71.5% | $8.16 | Med | aggressive; last 5 verbatim, older → dialog-only trail |
+| **Ultra** | 83.5% | $9.53 | High | archival only — drops everything structural |
+| **Truncate N** | varies | varies | Low | manual — caps every tool_result at N chars |
 
-**Drop-thinking toggle** (any non-Ultra mode): cuts 200k+ tokens. Claude doesn't re-read prior thinking on resume; it's free savings.
+**Why Recency 5 is the default.** JetBrains' 2025 NeurIPS study ("The Complexity Trap") tested **observation masking** — keeping tool call names and arguments but dropping old tool_result bodies — on 500 SWE-bench Verified tasks. It matched or beat LLM summarization on 4/5 model configs at 52% lower cost. Recency N implements exactly that pattern: last N turns untouched, older turns observation-masked. Focus N is more aggressive — it also drops `tool_use` metadata from older turns, which is **outside what any public benchmark has validated either way**. For topic-pivoting sessions, Chroma's Context Rot work suggests stale tool metadata could act as distractor and Focus might actually help; for continuing the same task, keeping metadata is the safer call and what JetBrains tested. Recency 5 is the boring, tested default. Focus 5 is one click away if you want the bigger savings. See [theory →](https://bihanikeshav.github.io/ClaudeCompress/theory.html) for the full breakdown.
 
-Real savings on a 761k-token Opus 4.6 session (153 user turns, 200k+ context tier). **Focus 5 is the default**: keeps your last 5 exchanges verbatim (tool outputs, thinking, everything), dialog-only trail for everything older. Claude can re-read any file it needs from disk; the conversation flow stays intact. Cuts cost by ~70%.
+**N counts your user messages**, not JSONL records. Each time you send a message, everything the agent does in response (tool calls, tool results, thinking, reply) is one "user turn". `Recency 5` keeps the last 5 back-and-forths fully intact and observation-masks everything older.
 
-| Mode | Tokens | Cost | Saved |
-|---|---|---|---|
-| Baseline | 761k | $22.83 | — |
-| Recency 15 | 574k | $17.22 | $5.61 |
-| Redact | 503k | $15.09 | $7.74 |
-| Focus 15 | 327k | $9.81 | $13.02 |
-| **Focus 5** (recommended) | **217k** | **$6.51** | **$16.32** |
-| Ultra | 125k | $1.88 | $20.95 |
+**Drop-thinking**: scoped to turns outside the last-N window. Recent thinking is always preserved because on Opus 4.5+ the API keeps thinking across turns by default.
 
-Cost uses Opus 4.6's 200k+ input rate ($30/Mtok for the full context once it crosses the threshold, $15/Mtok otherwise — Ultra's 125k drops below the tier). Token counts are char-based approximations, within ~10% of Anthropic's tokenizer. Same table for Opus 4.7/Sonnet/Haiku uses each model's own rates.
+Cost uses Opus 4.6's 200k+ input rate ($30/Mtok for the full context once it crosses the threshold, $15/Mtok otherwise — Ultra's 125k drops below the tier). Token counts are char-based approximations, within ~10% of Anthropic's tokenizer.
 
 ## When to trim
 

@@ -479,7 +479,7 @@
           <cite><a href="https://arxiv.org/abs/2508.21433">Lindenbauer &amp; Fraser · JetBrains Research · 2025</a></cite>
         </blockquote>
 
-        <p class="intro">This is the basis for claudecompress's <code>Redact</code> mode. Tool call structure survives. Bodies drop. When Claude needs the content again, it re-invokes the tool.</p>
+        <p class="intro">The paper's formalization is specific: past observations (tool_result bodies) are replaced; agent reasoning and actions (tool_use calls with names and arguments) are preserved verbatim. Recency mode in claudecompress maps to exactly this pattern for older turns. Focus mode goes further and drops the tool_use metadata too — which is outside what the paper validated either way.</p>
       </div>
     </section>
 
@@ -617,10 +617,44 @@
 
     <section>
       <div class="wrap">
+        <div class="sec-tag">Mode selection</div>
+        <h2>Which mode to pick, and when.</h2>
+        <p class="intro">Measured on a real 761k-token Opus 4.6 session (153 user turns):</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Mode</th>
+                <th>% saved</th>
+                <th>Quality risk</th>
+                <th>Use when</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="mode-cell">Smart</td><td>17.9%</td><td class="keeps">low</td><td>Read-heavy session, want light touch</td></tr>
+              <tr><td class="mode-cell">Recency 15</td><td>26.7%</td><td class="keeps">low</td><td>Long session, wide recent context matters</td></tr>
+              <tr><td class="mode-cell">Recency 5 (default)</td><td>32.8%</td><td class="keeps">low</td><td>Continuing the same task — research-aligned</td></tr>
+              <tr><td class="mode-cell">Redact</td><td>36.7%</td><td class="trims">med</td><td>Session cleanup (drops recent tool_results too)</td></tr>
+              <tr><td class="mode-cell">Focus 15</td><td>57.1%</td><td class="trims">med</td><td>Pivoting topics, old breadcrumbs = noise</td></tr>
+              <tr><td class="mode-cell">Focus 5</td><td>71.5%</td><td class="trims">med</td><td>Big session, cost-sensitive, accept untested trim</td></tr>
+              <tr><td class="mode-cell">Ultra</td><td>83.5%</td><td class="drops">high</td><td>Archival — not for continuing work</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="caption">Quality risk is qualitative: Recency sits closest to the JetBrains observation-masking pattern (tested at scale). Focus drops older <code>tool_use</code> metadata — not proven worse, but outside what the paper validated. Redact drops <em>recent</em> tool_result bodies too, which kills the working state of the last turn.</p>
+
+        <p class="intro" style="margin-top: 1.4rem"><strong style="color:var(--fg-soft);font-weight:500">Counter-case for Focus.</strong> Chroma's Context Rot study finds that semantically-similar-but-irrelevant tokens actively mislead models (distractor interference). In a session where you've pivoted topic (e.g., finished the auth refactor, now working on the billing module), retained stale tool_use calls with old file paths become textbook distractors. JetBrains tested on SWE-bench where older tool calls stay topic-relevant; in pivot-heavy sessions Focus's more aggressive trimming could plausibly help. There's no public benchmark that directly measures this — Recency is the safer default because it matches a tested pattern, not because Focus is proven-worse.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
         <div class="sec-tag">On thinking blocks</div>
         <h2>A default that quietly flipped.</h2>
         <p class="intro">Through Claude 4.4, the API stripped prior thinking blocks between turns — dropping them was free. Starting <code>Opus 4.5</code>, the default flipped: thinking blocks are preserved. There's an open <a href="https://github.com/anthropics/claude-code/issues/20249" style="color:var(--accent-soft)">Claude Code issue</a> flagging the documentation inconsistency.</p>
-        <p class="intro">claudecompress accounts for this by <em>always preserving thinking within the last N user turns</em> (Focus 5's window by default), even when drop-thinking is enabled. Older thinking still gets dropped — it's rarely load-bearing past the recent window — but recent thinking is never touched.</p>
+        <p class="intro">claudecompress accounts for this by <em>always preserving thinking within the last N user turns</em>, even when drop-thinking is enabled. Older thinking still gets dropped — it's rarely load-bearing past the recent window — but recent thinking is never touched.</p>
       </div>
     </section>
 
@@ -629,7 +663,8 @@
         <div class="sec-tag">Caveats</div>
         <h2>What this theory doesn't prove.</h2>
         <ul class="prose">
-          <li>No controlled A/B test on claudecompress specifically. The JetBrains observation-masking result uses a similar strategy on a different tool. Principles transfer; direct validation is still owed.</li>
+          <li>SWE-bench Verified measures <em>task completion</em>. claudecompress cares about <em>resume coherence</em> — whether the agent picks up where you left off after /resume. These optima may diverge. JetBrains' observation-masking result is a strong proxy, not a direct benchmark of our use case.</li>
+          <li>No controlled A/B test on claudecompress specifically. The measured savings are concrete; the quality story is research-aligned but not empirically validated end-to-end.</li>
           <li><em>Lost in the Middle</em> (2023) tested GPT-3.5 and Claude 1.3. Opus 4.6 scores 78.3% on MRCR v2 at 1M tokens — much better, but the phenomenon persists, especially for Sonnet at extreme context lengths.</li>
           <li>Scores mix published findings with logical inference. Treat them as informed starting points, not precise measurements. Re-derivability assumes tool access on resume.</li>
         </ul>

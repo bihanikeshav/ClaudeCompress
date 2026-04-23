@@ -58,8 +58,8 @@ function parseCompressArgs(prompt: string): (TrimOptions & { force?: boolean }) 
   // Strip "force" from anywhere in the arg list; remaining tokens are mode+N.
   const force = allTokens.includes("force") || allTokens.includes("--force");
   const tokens = allTokens.filter((t) => t !== "force" && t !== "--force");
-  const modeTok = (tokens[0] ?? "focus") as TrimMode;
-  const mode: TrimMode = VALID_MODES.includes(modeTok) ? modeTok : "focus";
+  const modeTok = (tokens[0] ?? "recency") as TrimMode;
+  const mode: TrimMode = VALID_MODES.includes(modeTok) ? modeTok : "recency";
   const opts: TrimOptions & { force?: boolean } = { mode };
   if (force) opts.force = true;
   if (mode === "truncate") opts.keepChars = Number(tokens[1]) || 400;

@@ -214,31 +214,31 @@ async function pickMode(
 
   const mode = await p.select({
     message: "How aggressive?",
-    initialValue: "focus",
+    initialValue: "recency",
     options: [
       {
-        value: "redact",
-        label: `${pc.yellow("Redact")}  ${pc.dim("drop tool_result bodies, keep structure")}${savingsTag("redact")}`,
-      },
-      {
         value: "recency",
-        label: `${pc.blue("Recency")}  ${pc.dim(`keep last N user turns verbatim, redact older`)}${savingsTag("recency")}`,
-      },
-      {
-        value: "focus",
-        label: `${pc.cyan("Focus")}  ${pc.dim(`dialog trail + last N user turns verbatim`)}${savingsTag("focus")}`,
+        label: `${pc.blue("Recency")}  ${pc.green("★")} ${pc.dim("keep last N verbatim, observation-mask older (research-aligned)")}${savingsTag("recency")}`,
       },
       {
         value: "smart",
         label: `${pc.magenta("Smart")}  ${pc.dim("per-tool rules — Read heads, Bash errors, full TodoWrite")}${savingsTag("smart")}`,
       },
       {
+        value: "redact",
+        label: `${pc.yellow("Redact")}  ${pc.dim("drop ALL tool_result bodies (incl recent) — session cleanup")}${savingsTag("redact")}`,
+      },
+      {
+        value: "focus",
+        label: `${pc.cyan("Focus")}  ${pc.dim("aggressive — dialog trail only for older turns (loses breadcrumbs)")}${savingsTag("focus")}`,
+      },
+      {
         value: "ultra",
-        label: `${pc.green("Ultra")}  ${pc.dim("dialog only; tool calls/results/thinking dropped")}${savingsTag("ultra")}`,
+        label: `${pc.green("Ultra")}  ${pc.dim("nuclear — dialog only, tool calls/results/thinking all dropped")}${savingsTag("ultra")}`,
       },
       {
         value: "truncate",
-        label: `${pc.cyan("Truncate")}  ${pc.dim("keep first N chars of every tool_result")}${savingsTag("truncate")}`,
+        label: `${pc.cyan("Truncate")}  ${pc.dim("manual — keep first N chars of every tool_result")}${savingsTag("truncate")}`,
       },
     ],
   });
