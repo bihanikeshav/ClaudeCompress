@@ -75,19 +75,68 @@ function parseBreakArgs(prompt: string): { minutes: number } | null {
   return { minutes: Math.min(minutes, 240) }; // cap at 4h
 }
 
-function resolveSessionFile(input: HookInput): string | null {
-  if (input.transcript_path && existsSync(input.transcript_path))
-    return input.transcript_path;
-  if (input.session_id && input.cwd) {
-    const path = join(
-      homedir(),
-      ".claude",
-      "projects",
-      encodeCwd(input.cwd),
-      `${input.session_id}.jsonl`,
-    );
-    if (existsSync(path)) return path;
+/**
+ * Normalize a path that Claude Code might pass in any of: Windows native
+ * (`C:/Users/...`), bash/MSYS style (`/c/Users/...`), or a
+ * backslash mix. Returns the first variant that actually exists on disk.
+ */
+function firstExisting(...paths: (string | undefined | null)[]): string | null {
+  for (const p of paths) {
+    if (!p) continue;
+    try { if (existsSync(p)) return p; } catch {}
   }
+  return null;
+}
+
+function msysToWin(p: string): string | null {
+  // /c/Users/Keshav/... → C:/Users/Keshav/...
+  const m = p.match(/^\/([a-zA-Z])\/(.*)$/);
+  return m ? `${m[1]!.toUpperCase()}:/${m[2]}` : null;
+}
+
+function winToMsys(p: string): string | null {
+  // C:/Users/Keshav/... → /c/Users/Keshav/...
+  const m = p.match(/^([a-zA-Z]):[\\/](.*)$/);
+  return m ? `/${m[1]!.toLowerCase()}/${m[2]!.replace(/\\/g, "/")}` : null;
+}
+
+function resolveSessionFile(input: HookInput): string | null {
+  const tried: string[] = [];
+  const tp = input.transcript_path;
+  if (tp) {
+    const found = firstExisting(tp, msysToWin(tp), winToMsys(tp));
+    if (found) return found;
+    tried.push(tp);
+  }
+  if (input.session_id && input.cwd) {
+    const cwdVariants = [input.cwd, msysToWin(input.cwd), winToMsys(input.cwd)];
+    for (const cwd of cwdVariants) {
+      if (!cwd) continue;
+      const path = join(
+        homedir(),
+        ".claude",
+        "projects",
+        encodeCwd(cwd),
+        `${input.session_id}.jsonl`,
+      );
+      const found = firstExisting(path, msysToWin(path), winToMsys(path));
+      if (found) return found;
+      tried.push(path);
+    }
+  }
+  // Emit a diagnostic log so the user can see what paths we tried.
+  try {
+    const logPath = join(homedir(), ".claude", "claudecompress", "hook-debug.log");
+    writeFileSync(
+      logPath,
+      `resolveSessionFile failed at ${new Date().toISOString()}\n` +
+        `input.transcript_path: ${tp}\n` +
+        `input.cwd: ${input.cwd}\n` +
+        `input.session_id: ${input.session_id}\n` +
+        `tried:\n  ${tried.join("\n  ")}\n---\n`,
+      { flag: "a" },
+    );
+  } catch {}
   return null;
 }
 
@@ -387,9 +436,8 @@ function runBreakHook(input: HookInput, args: { minutes: number }): void {
 }
 
 function pickCacheReadRate(model: ModelInfo, _tokens: number): number {
-  // Use the model's published cache-read rate ($/Mtok). The ModelInfo
-  // doesn't currently encode Opus 4.6's 200k+ tier; treat this as a
-  // conservative lower-bound for break cost estimates.
+  // Opus 4.5+ bills the full 1M context at flat per-token rates, so
+  // cache-read cost scales linearly with session size.
   return model.cachedInputPerMillion;
 }
 
@@ -398,27 +446,44 @@ function pickCacheReadRate(model: ModelInfo, _tokens: number): number {
 // ---------------------------------------------------------------------------
 
 export async function runHook(): Promise<void> {
-  const raw = await readStdin();
-  let input: HookInput = {};
   try {
-    input = JSON.parse(raw);
-  } catch {
-    process.exit(0);
+    const raw = await readStdin();
+    // Debug log: capture exactly what Claude Code sends so we can diagnose
+    // session-resolution issues on Windows (bash-style vs native paths, etc.).
+    try {
+      const logPath = join(homedir(), ".claude", "claudecompress", "hook-debug.log");
+      mkdirSync(dirname(logPath), { recursive: true });
+      writeFileSync(logPath, `${new Date().toISOString()}\n${raw}\n---\n`);
+    } catch {}
+
+    let input: HookInput = {};
+    try {
+      input = JSON.parse(raw);
+    } catch {
+      process.exit(0);
+    }
+
+    const prompt = input.prompt ?? "";
+
+    const compressOpts = parseCompressArgs(prompt);
+    if (compressOpts) {
+      await runCompressHook(input, compressOpts);
+      return;
+    }
+
+    const breakArgs = parseBreakArgs(prompt);
+    if (breakArgs) {
+      runBreakHook(input, breakArgs);
+      return;
+    }
+
+    process.exit(0); // unknown prompt — allow through
+  } catch (err) {
+    // Top-level safety net — surfaces any crash as stderr + exit 2 so the
+    // user sees WHY the hook failed instead of a silent "non-blocking
+    // status code" from Claude Code.
+    const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
+    process.stderr.write(`[claudecompress] hook crashed:\n${msg}\n`);
+    process.exit(2);
   }
-
-  const prompt = input.prompt ?? "";
-
-  const compressOpts = parseCompressArgs(prompt);
-  if (compressOpts) {
-    await runCompressHook(input, compressOpts);
-    return;
-  }
-
-  const breakArgs = parseBreakArgs(prompt);
-  if (breakArgs) {
-    runBreakHook(input, breakArgs);
-    return;
-  }
-
-  process.exit(0); // unknown prompt — allow through
 }

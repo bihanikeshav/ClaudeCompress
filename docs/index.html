@@ -952,7 +952,7 @@
     <div class="wrap">
       <span class="brand"><span class="mark">◉</span><a href="/" class="current" aria-current="page">claudecompress</a></span>
       <span class="meta">
-        <span id="npm-version">v0.7.0</span>
+        <span id="npm-version" data-version-sync>v0.15.0</span>
         <span class="dot-sep">·</span>
         <a href="/theory/">theory</a>
         <span class="dot-sep">·</span>
@@ -1019,10 +1019,10 @@
               <div class="hero-stat-body">
                 <span class="hero-stat-from">$7.61</span>
                 <span class="hero-stat-arrow">→</span>
-                <span class="hero-stat-to">$3.37</span>
-                <span class="hero-stat-pct">~56% saved on safe default</span>
+                <span class="hero-stat-to">$2.52</span>
+                <span class="hero-stat-pct">~67% saved on safe, averaged</span>
               </div>
-              <div class="hero-stat-foot">761k <span class="hero-stat-arrow">→</span> 337k tokens <span class="hero-stat-sep">·</span> Opus 4.6 cold rebuild</div>
+              <div class="hero-stat-foot">761k <span class="hero-stat-arrow">→</span> 252k tokens <span class="hero-stat-sep">·</span> Opus 4.6 cold rebuild</div>
               <div class="hero-stat-link">see breakdown ↓</div>
             </div>
           </a>
@@ -1087,8 +1087,8 @@
     <section id="savings">
       <div class="wrap">
         <div class="sec-tag"><span>Savings</span></div>
-        <h2>Real numbers, real session.</h2>
-        <p class="intro intro-wide">Measured on a 761k-token Opus 4.6 session (153 user turns). Cost is the real cold /resume rebuild — 1h cache write rate ($10/Mtok on Opus 4.6, per Anthropic pricing). <code>safe</code> (default) keeps the last 5 exchanges fully intact and observation-masks everything older — the pattern validated by JetBrains' 2025 NeurIPS paper. All modes apply <em>squash</em> (rtk-style per-tool-call compression) to preserved tool outputs. Run <code>bunx claudecompress</code> on your own sessions to verify the math.</p>
+        <h2>Real savings, averaged across real sessions.</h2>
+        <p class="intro intro-wide">Numbers below are the <strong>mean</strong> across three coding sessions (rag-canary 760k Edit-heavy, tender 600k tool-heavy, CV 280k text-heavy) applied to a 761k Opus 4.6 baseline. Cost is the real cold /resume rebuild — 1h cache write rate ($10/Mtok). Actual savings vary by session shape; safe saves anywhere from 58% to 76% in our benchmark. <code>safe</code> (default) keeps the last 5 exchanges intact and observation-masks everything older — the pattern validated by JetBrains' 2025 NeurIPS paper. All modes apply <em>squash</em> (rtk-style per-tool-call compression). Run <code>bunx claudecompress</code> on your own sessions to compare.</p>
         <div class="table-wrap">
           <table>
             <thead>
@@ -1101,11 +1101,11 @@
             </thead>
             <tbody>
               <tr class="baseline"><td class="mode">Baseline</td><td>761k</td><td>$7.61</td><td>$0.00</td></tr>
-              <tr><td class="mode">lossless</td><td class="tok tier-1">626k</td><td class="cost" data-start="7.61" data-target="6.26">$6.26</td><td class="saved tier-1">$1.35</td></tr>
-              <tr class="pick"><td class="mode">safe</td><td class="tok tier-2">337k</td><td class="cost" data-start="7.61" data-target="3.37">$3.37</td><td class="saved tier-2">$4.24</td></tr>
-              <tr><td class="mode">smart</td><td class="tok tier-3">251k</td><td class="cost" data-start="7.61" data-target="2.51">$2.51</td><td class="saved tier-3">$5.09</td></tr>
-              <tr><td class="mode">slim</td><td class="tok tier-3">207k</td><td class="cost" data-start="7.61" data-target="2.07">$2.07</td><td class="saved tier-3">$5.54</td></tr>
-              <tr><td class="mode">archive</td><td class="tok tier-4">125k</td><td class="cost" data-start="7.61" data-target="1.25">$1.25</td><td class="saved tier-4">$6.35</td></tr>
+              <tr><td class="mode">lossless</td><td class="tok tier-1">533k</td><td class="cost" data-start="7.61" data-target="5.33">$5.33</td><td class="saved tier-1">$2.28</td></tr>
+              <tr class="pick"><td class="mode">safe</td><td class="tok tier-2">252k</td><td class="cost" data-start="7.61" data-target="2.52">$2.52</td><td class="saved tier-2">$5.09</td></tr>
+              <tr><td class="mode">smart</td><td class="tok tier-3">180k</td><td class="cost" data-start="7.61" data-target="1.80">$1.80</td><td class="saved tier-3">$5.81</td></tr>
+              <tr><td class="mode">slim</td><td class="tok tier-3">142k</td><td class="cost" data-start="7.61" data-target="1.42">$1.42</td><td class="saved tier-3">$6.19</td></tr>
+              <tr><td class="mode">archive</td><td class="tok tier-4">132k</td><td class="cost" data-start="7.61" data-target="1.32">$1.32</td><td class="saved tier-4">$6.29</td></tr>
             </tbody>
           </table>
         </div>
@@ -1202,19 +1202,9 @@
       });
     }
 
-    // --- live npm version in the header badge ----------------------------
-    (async () => {
-      const el = document.getElementById("npm-version");
-      if (!el) return;
-      try {
-        const r = await fetch("https://registry.npmjs.org/claudecompress/latest", { cache: "no-store" });
-        if (!r.ok) return;
-        const { version } = await r.json();
-        if (version) el.textContent = "v" + version;
-      } catch {
-        // offline / blocked — keep the hard-coded fallback
-      }
-    })();
+    // Version badge is baked at build time by scripts/sync-version.js
+    // (reads package.json, rewrites the span with data-version-sync).
+    // No runtime fetch — avoids first-paint jitter.
 
     // --- section scroll-reveal -------------------------------------------
     if (!REDUCE_MOTION && "IntersectionObserver" in window) {

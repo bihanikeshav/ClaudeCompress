@@ -5,8 +5,30 @@ import { randomUUID } from "node:crypto";
 import type { TrimOptions } from "./types.ts";
 import { squashToolResult, squashToolUseInput } from "./squash.ts";
 
-const TRIM_MARKER = "[TRIMMED by claudecompress] ";
 const REDACT_PLACEHOLDER = "";
+
+// Any string matching this pattern is an old trim marker. When we re-trim
+// a session that was already trimmed, we strip the old marker before
+// prepending the new one so titles don't accumulate
+// "[TRIMMED …][TRIMMED …][TRIMMED …]". Matches both timestamped
+// ("[TRIMMED by claudecompress · 2026-04-23 20:42]") and legacy
+// ("[TRIMMED by claudecompress]") variants.
+const TRIM_MARKER_RE = /^\[TRIMMED by claudecompress(?:\s*·\s*[^\]]+)?\]\s*/;
+
+function buildTrimMarker(): string {
+  // YYYY-MM-DD HH:MM in local time; short enough for a prefix.
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return `[TRIMMED by claudecompress · ${stamp}] `;
+}
+
+function stripOldMarker(s: string): string {
+  // Peel off any accumulated trim markers (in case older builds chained them).
+  let out = s;
+  while (TRIM_MARKER_RE.test(out)) out = out.replace(TRIM_MARKER_RE, "");
+  return out;
+}
 
 function redactToolResult(blk: any): any {
   const out: Record<string, unknown> = {
@@ -212,9 +234,10 @@ function markFirstUser(rec: any): any {
   const msg = rec.message;
   if (!msg) return rec;
   const c = msg.content;
+  const marker = buildTrimMarker();
   const copy = { ...rec, message: { ...msg } };
   if (typeof c === "string") {
-    copy.message.content = TRIM_MARKER + c;
+    copy.message.content = marker + stripOldMarker(c);
     return copy;
   }
   if (Array.isArray(c)) {
@@ -222,14 +245,15 @@ function markFirstUser(rec: any): any {
     let injected = false;
     for (const b of c) {
       if (!injected && b?.type === "text") {
-        newList.push({ ...b, text: TRIM_MARKER + (b.text ?? "") });
+        const cleaned = stripOldMarker(b.text ?? "");
+        newList.push({ ...b, text: marker + cleaned });
         injected = true;
       } else {
         newList.push(b);
       }
     }
     if (!injected) {
-      newList.unshift({ type: "text", text: TRIM_MARKER.trim() });
+      newList.unshift({ type: "text", text: marker.trim() });
     }
     copy.message.content = newList;
     return copy;
@@ -262,31 +286,8 @@ function isUserTextTurn(rec: any): boolean {
   return true;
 }
 
-/**
- * Scan the JSONL once and return the record index of the Nth-from-last user
- * text turn. The trim loop treats records at or after this index as "recent"
- * (kept verbatim); records before it are trimmed per the mode.
- *
- * Returns 0 if there are fewer than N user turns total (keep everything).
- */
-function findRecencyCutoffRecordIndex(path: string, keepLastN: number): number {
-  const data = readFileSync(path, "utf8");
-  const lines = data.split("\n");
-  const userTurnAtRecord: number[] = [];
-  let recordIdx = -1;
-  for (const line of lines) {
-    if (!line) continue;
-    recordIdx += 1;
-    try {
-      const r = JSON.parse(line);
-      if (isUserTextTurn(r)) userTurnAtRecord.push(recordIdx);
-    } catch {
-      // skip
-    }
-  }
-  if (userTurnAtRecord.length <= keepLastN) return 0;
-  return userTurnAtRecord[userTurnAtRecord.length - keepLastN];
-}
+// Recency cutoff is derived from the single prescan in trimSession — no
+// separate function needed. Kept as an inline `cutoffFor(N)` closure.
 
 function dropThinkingBlocks(rec: any): any | null {
   const msg = rec?.message;
@@ -317,51 +318,75 @@ export async function trimSession(
   const toolUseNames = new Map<string, string>();
   const toolUseInputs = new Map<string, any>();
 
-  // Prescan: collect every tool_use → (name, input) so squash can look them
-  // up by tool_use_id when it encounters a tool_result. Streaming the file
-  // in order already sees tool_use before the matching tool_result, so we
-  // could populate this inline, but banded mode's record-skipping logic
-  // makes the prescan safer.
+  // Single prescan pass that collects everything we need:
+  //  - tool_use → (name, input) map for squash lookups
+  //  - array of record indices where each user turn begins, so we can
+  //    derive keep-last-N cutoffs for any N without re-reading the file.
+  //  - latestReadId: file_path → tool_use_id of the LAST Read on that file
+  //    (earlier Reads are stale — dedup by replacing their tool_result)
+  //  - latestTodoWriteId: tool_use_id of the last TodoWrite (older Todo
+  //    states are overwritten; keep only the most recent)
+  const userTurnAtRecord: number[] = [];
+  const latestReadIdByPath = new Map<string, string>();
+  let latestTodoWriteId: string | null = null;
   {
-    const fd = readFileSync(inputPath, "utf8");
-    for (const line of fd.split("\n")) {
+    const data = readFileSync(inputPath, "utf8");
+    let recIdx = -1;
+    for (const line of data.split("\n")) {
       if (!line) continue;
+      recIdx += 1;
       try {
         const rec = JSON.parse(line);
         const content = rec?.message?.content;
-        if (!Array.isArray(content)) continue;
-        for (const blk of content) {
-          if (blk?.type === "tool_use" && blk.id) {
-            if (blk.name) toolUseNames.set(blk.id, blk.name);
-            if (blk.input) toolUseInputs.set(blk.id, blk.input);
+        if (Array.isArray(content)) {
+          for (const blk of content) {
+            if (blk?.type === "tool_use" && blk.id) {
+              if (blk.name) toolUseNames.set(blk.id, blk.name);
+              if (blk.input) toolUseInputs.set(blk.id, blk.input);
+              if (blk.name === "Read" && typeof blk.input?.file_path === "string") {
+                latestReadIdByPath.set(blk.input.file_path, blk.id);
+              }
+              if (blk.name === "TodoWrite") {
+                latestTodoWriteId = blk.id;
+              }
+            }
           }
+        }
+        if (isUserTextTurn(rec)) {
+          userTurnAtRecord.push(recIdx);
         }
       } catch {}
     }
   }
 
-  // safe and slim both need a cutoff; archive doesn't (drops everything structural).
+  const isSupersededTool = (tool_use_id: string): boolean => {
+    const name = toolUseNames.get(tool_use_id);
+    if (name === "Read") {
+      const fp = toolUseInputs.get(tool_use_id)?.file_path;
+      if (typeof fp !== "string") return false;
+      return latestReadIdByPath.get(fp) !== tool_use_id;
+    }
+    if (name === "TodoWrite") {
+      return latestTodoWriteId !== tool_use_id;
+    }
+    return false;
+  };
+
+  const cutoffFor = (keepLastN: number): number => {
+    if (userTurnAtRecord.length <= keepLastN) return 0;
+    return userTurnAtRecord[userTurnAtRecord.length - keepLastN]!;
+  };
+
   const needsCutoff = opts.mode === "safe" || opts.mode === "slim";
-  const cutoffRecordIdx = needsCutoff
-    ? findRecencyCutoffRecordIndex(inputPath, opts.keepLastN ?? 5)
-    : 0;
+  const cutoffRecordIdx = needsCutoff ? cutoffFor(opts.keepLastN ?? 5) : 0;
 
-  // smart mode uses two cutoffs for three bands:
-  //   band 0: <= 5 user turns back
-  //   band 1: 6–15 user turns back
-  //   band 2: 16+ user turns back
   const isBanded = opts.mode === "smart";
-  const band0Cutoff = isBanded ? findRecencyCutoffRecordIndex(inputPath, 5) : 0;
-  const band1Cutoff = isBanded ? findRecencyCutoffRecordIndex(inputPath, 15) : 0;
+  const band0Cutoff = isBanded ? cutoffFor(5) : 0;
+  const band1Cutoff = isBanded ? cutoffFor(15) : 0;
 
-  // Preserve thinking blocks within the last N user turns regardless of mode.
-  // On Opus 4.5+, thinking blocks are preserved by default (see Anthropic's
-  // context editing docs). Dropping recent thinking would remove signal the
-  // model actively uses on the next turn. Default window: 5 user turns if
-  // the mode doesn't specify its own keepLastN.
   const thinkingKeepN = opts.keepLastN ?? 5;
   const thinkingCutoffIdx = opts.dropThinking && opts.mode !== "archive"
-    ? findRecencyCutoffRecordIndex(inputPath, thinkingKeepN)
+    ? cutoffFor(thinkingKeepN)
     : 0;
 
   let recordIdx = -1;
@@ -376,6 +401,12 @@ export async function trimSession(
       continue;
     }
     recordIdx += 1;
+
+    // file-history-snapshot records are harness metadata for /rewind, not
+    // model-reasoning context. Drop them universally — every mode benefits
+    // and nothing downstream needs them on resume.
+    if (rec?.type === "file-history-snapshot") continue;
+
     const inRecent = needsCutoff && recordIdx >= cutoffRecordIdx;
     let newRec: any | null;
     if (opts.mode === "archive") {
@@ -417,30 +448,44 @@ export async function trimSession(
         lastKeptUuid = newRec.uuid ?? lastKeptUuid;
       }
     }
-    // Universal squash: compress bloated tool outputs per-tool.
-    // Runs across all non-archive modes. Archive has no tool_results.
+    // Universal squash: compress tool outputs, dedup superseded Reads /
+    // TodoWrites, and (for non-lossless modes outside the recent window)
+    // compress tool_use INPUTS + truncate verbose older assistant text.
     //
-    // Separately, for records OUTSIDE the last-N window (safe/slim) or
-    // outside band 0 (smart), also compress tool_use INPUTS — Edit's
-    // old_string/new_string, Write's content, etc. These account for
-    // ~46% of session tokens on typical coding sessions. The model can
-    // re-Read the current file state if it needs detail on old diffs.
-    //
-    // Lossless preserves tool_use inputs verbatim (its contract).
+    // Applied across all non-archive modes. Archive strips tool structure.
     if (opts.mode !== "archive" && newRec?.message && Array.isArray(newRec.message.content)) {
       const compressInputs =
         (opts.mode === "safe" || opts.mode === "slim") ? !inRecent
         : opts.mode === "smart" ? recordIdx < band0Cutoff
         : /* lossless */ false;
 
+      const isAssistantRec = newRec.type === "assistant";
+
       const squashed = newRec.message.content.map((blk: any) => {
         if (blk?.type === "tool_result") {
+          // Dedup: if this tool_result is from a Read or TodoWrite that
+          // was superseded later in the session, empty its body. The
+          // tool_use block stays as breadcrumb; the LATEST Read/Todo
+          // for the same path keeps its result.
+          if (blk.tool_use_id && isSupersededTool(blk.tool_use_id)) {
+            return { ...blk, content: "" };
+          }
           const toolName = toolUseNames.get(blk.tool_use_id);
           const toolInput = toolUseInputs.get(blk.tool_use_id);
           return squashToolResult(blk, toolName, toolInput);
         }
         if (blk?.type === "tool_use" && compressInputs) {
           return squashToolUseInput(blk, blk.name);
+        }
+        // Truncate older assistant text. On safe mode, older turns are
+        // kept verbatim via observation masking — but the filler prose
+        // ("Great, I'll now...", "Let me check...") is rarely load-bearing.
+        // Cap at 400 chars for records outside the recent window.
+        if (blk?.type === "text" && compressInputs && isAssistantRec) {
+          const t = blk.text;
+          if (typeof t === "string" && t.length > 400) {
+            return { ...blk, text: t.slice(0, 400) };
+          }
         }
         return blk;
       });

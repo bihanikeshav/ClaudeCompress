@@ -185,7 +185,7 @@ See [theory →](https://bihanikeshav.github.io/ClaudeCompress/theory/) for per-
 
 **Drop-thinking** (`safe`/`slim` only): scoped to turns outside the last-N window. `smart` handles thinking per-band in its own rules.
 
-Cost reflects **cold /resume** on Claude Code, which rebuilds the full session into 1h cache. Per Anthropic's pricing: 1h cache write = 2× base input. For Opus 4.6 that's $10/Mtok (= 2 × $5/Mtok base). The full 1M context is billed at flat per-token rates — no tier pricing on Opus 4.5+. Token counts are char-based approximations within ~10% of Anthropic's tokenizer. Run `bunx claudecompress` on your own sessions to verify.
+Cost reflects **cold /resume** on Claude Code, which rebuilds the full session into 1h cache. Per Anthropic's pricing: 1h cache write = 2× base input. For Opus 4.6 that's $10/Mtok (= 2 × $5/Mtok base). The full 1M context is billed at flat per-token rates. Token counts are char-based approximations within ~10% of Anthropic's tokenizer. Run `bunx claudecompress` on your own sessions to verify.
 
 ## When to trim
 
