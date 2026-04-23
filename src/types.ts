@@ -1,4 +1,4 @@
-export type TrimMode = "safe" | "smart" | "slim" | "archive";
+export type TrimMode = "lossless" | "safe" | "smart" | "slim" | "archive";
 
 /**
  * Legacy mode names from earlier versions, kept parseable so old slash

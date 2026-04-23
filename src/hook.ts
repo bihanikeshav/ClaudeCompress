@@ -42,7 +42,7 @@ function readStdin(): Promise<string> {
   });
 }
 
-const VALID_MODES: TrimMode[] = ["safe", "smart", "slim", "archive"];
+const VALID_MODES: TrimMode[] = ["lossless", "safe", "smart", "slim", "archive"];
 
 function parseCompressArgs(
   prompt: string,
@@ -101,6 +101,7 @@ function modeLabel(opts: TrimOptions): string {
   if (opts.mode === "safe" || opts.mode === "slim")
     return `${opts.mode} (last ${opts.keepLastN})`;
   if (opts.mode === "smart") return "smart (per-component)";
+  if (opts.mode === "lossless") return "lossless (squash only)";
   return opts.mode; // archive
 }
 

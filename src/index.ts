@@ -167,6 +167,7 @@ async function estimateModeSavings(
   const baseCost = estimateColdResumeCost(baseTokens, model);
 
   const jobs: { key: string; opts: TrimOptions }[] = [
+    { key: "lossless", opts: { mode: "lossless" } },
     { key: "safe", opts: { mode: "safe", keepLastN: defaultN, dropThinking: true } },
     { key: "smart", opts: { mode: "smart" } },
     { key: "slim", opts: { mode: "slim", keepLastN: defaultN, dropThinking: true } },
@@ -215,6 +216,10 @@ async function pickMode(
     initialValue: "safe",
     options: [
       {
+        value: "lossless",
+        label: `${pc.green("lossless")}  ${pc.dim("only squash verbose tool outputs — preserves every turn")}${savingsTag("lossless")}`,
+      },
+      {
         value: "safe",
         label: `${pc.blue("safe")}  ${pc.green("★")} ${pc.dim("keep last N verbatim, observation-mask older — research-aligned")}${savingsTag("safe")}`,
       },
@@ -237,6 +242,7 @@ async function pickMode(
   let baseOpts: TrimOptions = { mode: mode as TrimMode };
 
   if (mode === "safe" || mode === "slim") {
+    // fallthrough — asks for N below
     const raw = await p.text({
       message: "How many recent user turns (your messages) to keep verbatim?",
       placeholder: String(defaultN),

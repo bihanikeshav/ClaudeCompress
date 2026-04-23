@@ -243,6 +243,24 @@ export function squashToolResultContent(
 }
 
 /**
+ * Tools that return an image block along with text — screenshots, image
+ * generators, etc. The text block carries the signal; the image base64
+ * is usually 50-100KB of noise that the model can't re-use on resume
+ * anyway (vision capability was needed when the tool ran, not later).
+ */
+function isImageProducingTool(toolName: string | undefined): boolean {
+  if (!toolName) return false;
+  const n = toolName.toLowerCase();
+  return (
+    n.includes("screenshot") ||
+    n.includes("take_screenshot") ||
+    n.includes("upload_image") ||
+    n.includes("image_") ||
+    n.includes("_image")
+  );
+}
+
+/**
  * Apply squashing to a tool_result block. Handles both string content
  * and array-of-blocks content (mostly for image-laden results).
  */
@@ -258,15 +276,26 @@ export function squashToolResult(
     return squashed === c ? blk : { ...blk, content: squashed };
   }
   if (Array.isArray(c)) {
+    const stripImages = isImageProducingTool(toolName);
     let changed = false;
-    const newContent = c.map((b: any) => {
+    const newContent: any[] = [];
+    for (const b of c) {
+      if (b?.type === "image" && stripImages) {
+        // Replace image block with a terse placeholder so the model sees
+        // "screenshot was captured here" without re-sending the base64.
+        // Done ONLY for known image-producing tools so we don't break
+        // vision capability on fresh image-based turns.
+        changed = true;
+        continue;
+      }
       if (b?.type === "text" && typeof b.text === "string") {
         const s = squashToolResultContent(b.text, toolName, toolInput);
-        if (s !== b.text) { changed = true; return { ...b, text: s }; }
-        return b;
+        if (s !== b.text) { changed = true; newContent.push({ ...b, text: s }); }
+        else newContent.push(b);
+        continue;
       }
-      return b;
-    });
+      newContent.push(b);
+    }
     return changed ? { ...blk, content: newContent } : blk;
   }
   return blk;

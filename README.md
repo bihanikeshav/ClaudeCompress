@@ -51,9 +51,10 @@ Type `/compress` in any session. The hook trims the active session's JSONL and p
 
 ```
 /compress               # safe (default) — observation masking + last 5 verbatim
+/compress lossless      # only squash tool outputs; keeps every turn (~18% saved)
 /compress safe 15       # keep a wider recent window
 /compress smart         # per-component rules — middle ground (~45% saved)
-/compress slim          # aggressive — drops older tool_use breadcrumbs (~70% saved)
+/compress slim          # aggressive — drops older tool_use breadcrumbs (~73% saved)
 /compress archive       # historical only — dialog-only throughout (~84% saved)
 /compress force         # override cache-warm refusal
 ```
@@ -158,12 +159,13 @@ Four modes, measured on a 761k-token Opus 4.6 session (153 user turns):
 
 | Mode | % saved | $ saved | Quality risk | What it does |
 |---|---|---|---|---|
+| **lossless** | 17.7% | $1.35 | None | squash verbose tool outputs; preserves every turn, no structure changes |
 | ⭐ **safe** (default, N=5) | 34.0% | $2.59 | Low | keep last N turns verbatim; observation-mask older (JetBrains-validated) |
 | **smart** | 45.3% | $3.44 | Low-Med | per-component rules by turn depth; tool_use skeleton survives always |
 | **slim** (N=5) | 72.8% | $5.54 | Med | keep last N; older turns become dialog-only trail (loses breadcrumbs) |
 | **archive** | 83.5% | $6.35 | High | historical only — drops everything structural, user+assistant text only |
 
-All modes also apply **squash** (rtk-style per-tool-call compression) to preserved tool outputs. Verbose `git push`, `npm install`, test runner, and similar commands get rewritten to their signal (pass/fail, count, error lines) instead of raw output. Adds ~1-2% savings on top with no quality cost.
+All modes (including lossless) apply **squash**: rtk-style per-tool-call compression that rewrites verbose tool outputs to their signal. `git push` → `<hash>..<hash> branch -> branch`. `npm install` → `added N packages`. Error lines are preserved even in compressed output. Screenshots keep the text description, drop the base64 image (saves ~70KB per screenshot). The token-cost numbers above are conservative — they don't count base64 image savings from vision tokens, which are stripped too.
 
 **Why `safe` is the default.** JetBrains' 2025 NeurIPS study ("The Complexity Trap") tested **observation masking** — keeping tool call names and arguments but dropping old tool_result bodies — on 500 SWE-bench Verified tasks. It matched or beat LLM summarization on 4/5 model configs at 52% lower cost. `safe` implements exactly that pattern.
 

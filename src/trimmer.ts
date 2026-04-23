@@ -383,6 +383,10 @@ export async function trimSession(
       if (!newRec) continue;
       newRec.parentUuid = lastKeptUuid;
       lastKeptUuid = newRec.uuid ?? lastKeptUuid;
+    } else if (opts.mode === "lossless") {
+      // Pass the record through unchanged (modulo sessionId). Only the
+      // universal squash step below will touch tool_results.
+      newRec = { ...rec, ...(rec.sessionId ? { sessionId: newSid } : {}) };
     } else if (opts.mode === "safe") {
       newRec = inRecent
         ? { ...rec, ...(rec.sessionId ? { sessionId: newSid } : {}) }
