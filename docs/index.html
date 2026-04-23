@@ -1060,8 +1060,8 @@
         <div class="split">
           <div>
             <h2>Trim <span class="italic">without</span> losing the thread.</h2>
-            <p class="intro"><code>Recency 5</code> (the default) keeps your last 5 exchanges fully intact: tool outputs, thinking, file contents. Older turns get <em>observation-masked</em> — tool call names and file paths stay as breadcrumbs, body content drops. Research-aligned with JetBrains' 2025 observation-masking study.</p>
-            <p class="intro">Need more savings? <code>Focus 5</code> goes further (~70% saved) by dropping older breadcrumbs too. <code>Ultra</code> is the nuclear option for archival.</p>
+            <p class="intro"><code>Recency 5</code> (the default) keeps your last 5 exchanges fully intact: tool outputs, thinking, file contents. Older turns get <em>observation-masked</em> — tool call names and file paths stay as breadcrumbs, bodies drop. Research-aligned with JetBrains' 2025 observation-masking study.</p>
+            <p class="intro">Need more? <code>Distill</code> applies per-component rules by turn depth (~45% saved). <code>Focus 5</code> drops older breadcrumbs for ~70% saved. <code>Ultra</code> is archival.</p>
             <p class="intro">Use <code>ccw</code>, the <code>claudecompress</code> wrapper, for a seamless resume. Or run <code>bunx claudecompress</code> as a standalone script.</p>
           </div>
           <div>
@@ -1101,11 +1101,8 @@
             </thead>
             <tbody>
               <tr class="baseline"><td class="mode">Baseline</td><td>761k</td><td>$22.83</td><td>$0.00</td></tr>
-              <tr><td class="mode">Smart</td><td class="tok tier-1">625k</td><td class="cost" data-start="22.83" data-target="18.74">$18.74</td><td class="saved tier-1">$4.08</td></tr>
-              <tr><td class="mode">Recency 15</td><td class="tok tier-1">558k</td><td class="cost" data-start="22.83" data-target="16.73">$16.73</td><td class="saved tier-1">$6.10</td></tr>
-              <tr class="pick"><td class="mode">Recency 5</td><td class="tok tier-2">511k</td><td class="cost" data-start="22.83" data-target="15.35">$15.35</td><td class="saved tier-2">$7.48</td></tr>
-              <tr><td class="mode">Redact</td><td class="tok tier-2">482k</td><td class="cost" data-start="22.83" data-target="14.46">$14.46</td><td class="saved tier-2">$8.37</td></tr>
-              <tr><td class="mode">Focus 15</td><td class="tok tier-3">326k</td><td class="cost" data-start="22.83" data-target="9.78">$9.78</td><td class="saved tier-3">$13.04</td></tr>
+              <tr class="pick"><td class="mode">Recency 5</td><td class="tok tier-1">511k</td><td class="cost" data-start="22.83" data-target="15.35">$15.35</td><td class="saved tier-1">$7.48</td></tr>
+              <tr><td class="mode">Distill</td><td class="tok tier-2">416k</td><td class="cost" data-start="22.83" data-target="12.48">$12.48</td><td class="saved tier-2">$10.35</td></tr>
               <tr><td class="mode">Focus 5</td><td class="tok tier-3">216k</td><td class="cost" data-start="22.83" data-target="6.49">$6.49</td><td class="saved tier-3">$16.34</td></tr>
               <tr><td class="mode">Ultra</td><td class="tok tier-4">125k</td><td class="cost" data-start="22.83" data-target="1.88">$1.88</td><td class="saved tier-4">$20.95</td></tr>
             </tbody>

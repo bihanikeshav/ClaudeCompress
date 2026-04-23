@@ -52,11 +52,9 @@ Type `/compress` in any session. The hook trims the active session's JSONL and p
 ```
 /compress               # Recency 5 (default) — observation masking + last 5 verbatim
 /compress recency 15    # keep a wider recent window
-/compress focus 5       # aggressive — drops older tool_use breadcrumbs too
-/compress smart         # per-tool rules (Read heads/tails, Bash errors)
-/compress redact        # cleanup — drops ALL tool_result bodies incl recent
-/compress ultra         # nuclear — dialog only, archival
-/compress truncate 500  # manual — keep first 500 chars per tool_result
+/compress distill       # per-component rules — middle ground (~45% saved)
+/compress focus 5       # aggressive — drops older tool_use breadcrumbs
+/compress ultra         # archival — dialog only
 /compress force         # override cache-warm refusal
 ```
 
@@ -156,26 +154,28 @@ CCW_CLAUDE_CMD=claude-me ccw
 
 ## Modes
 
-Measured on the same 761k-token Opus 4.6 session (153 user turns, 200k+ context tier):
+Four modes, measured on a 761k-token Opus 4.6 session (153 user turns, 200k+ context tier):
 
-| Mode | % tokens saved | $ saved | Quality risk | Notes |
+| Mode | % saved | $ saved | Quality risk | What it does |
 |---|---|---|---|---|
-| **Smart** | 17.9% | $2.04 | Low | per-tool rules — Read heads/tails, Bash errors, full TodoWrite |
-| **Recency 15** | 26.7% | $3.04 | Low | observation masking + wider recent window |
-| ⭐ **Recency 5** (default) | 32.8% | $3.74 | Low | observation masking + last 5 verbatim — research-aligned |
-| **Redact** | 36.7% | $4.18 | ⚠ Med | drops ALL tool_result bodies **including recent** — use for cleanup not resume |
-| **Focus 15** | 57.1% | $6.52 | Med | aggressive; drops older `tool_use` breadcrumbs |
-| **Focus 5** | 71.5% | $8.16 | Med | aggressive; last 5 verbatim, older → dialog-only trail |
-| **Ultra** | 83.5% | $9.53 | High | archival only — drops everything structural |
-| **Truncate N** | varies | varies | Low | manual — caps every tool_result at N chars |
+| ⭐ **Recency N** (default, N=5) | 32.8% | $3.74 | Low | keep last N turns verbatim; observation-mask older (JetBrains-validated) |
+| **Distill** | 45.3% | $5.17 | Low-Med | per-component rules by turn depth; tool_use skeleton survives always |
+| **Focus N** (N=5) | 71.5% | $8.16 | Med | keep last N; older turns become dialog-only trail (loses breadcrumbs) |
+| **Ultra** | 83.5% | $9.53 | High | archival — drops everything structural, user+assistant text only |
 
-**Why Recency 5 is the default.** JetBrains' 2025 NeurIPS study ("The Complexity Trap") tested **observation masking** — keeping tool call names and arguments but dropping old tool_result bodies — on 500 SWE-bench Verified tasks. It matched or beat LLM summarization on 4/5 model configs at 52% lower cost. Recency N implements exactly that pattern: last N turns untouched, older turns observation-masked. Focus N is more aggressive — it also drops `tool_use` metadata from older turns, which is **outside what any public benchmark has validated either way**. For topic-pivoting sessions, Chroma's Context Rot work suggests stale tool metadata could act as distractor and Focus might actually help; for continuing the same task, keeping metadata is the safer call and what JetBrains tested. Recency 5 is the boring, tested default. Focus 5 is one click away if you want the bigger savings. See [theory →](https://bihanikeshav.github.io/ClaudeCompress/theory.html) for the full breakdown.
+**Why Recency 5 is the default.** JetBrains' 2025 NeurIPS study ("The Complexity Trap") tested **observation masking** — keeping tool call names and arguments but dropping old tool_result bodies — on 500 SWE-bench Verified tasks. It matched or beat LLM summarization on 4/5 model configs at 52% lower cost. Recency N implements exactly that pattern.
+
+**Distill** is the intelligent middle ground. It applies different rules to different content types at different turn depths — Read results drop after 15 turns, Bash truncates at 300 chars in the 6-15 band, Agent results (pre-summarized) survive longer, thinking drops beyond recent, `tool_use` metadata stays as a skeleton even at depth. Saves more than Recency while keeping more structure than Focus.
+
+**Focus N** is more aggressive — it also drops `tool_use` metadata from older turns, which is **outside what any public benchmark has validated either way**. For topic-pivoting sessions, Chroma's Context Rot work suggests stale tool metadata could act as a distractor and Focus might actually help; for continuing the same task, keeping metadata is the safer call.
+
+See [theory →](https://bihanikeshav.github.io/ClaudeCompress/theory.html) for per-component relevance decay curves and how the Distill rule table was derived.
 
 **N counts your user messages**, not JSONL records. Each time you send a message, everything the agent does in response (tool calls, tool results, thinking, reply) is one "user turn". `Recency 5` keeps the last 5 back-and-forths fully intact and observation-masks everything older.
 
-**Drop-thinking**: scoped to turns outside the last-N window. Recent thinking is always preserved because on Opus 4.5+ the API keeps thinking across turns by default.
+**Drop-thinking** (Recency/Focus only): scoped to turns outside the last-N window. Distill handles thinking per-band in its own rules.
 
-Cost uses Opus 4.6's 200k+ input rate ($30/Mtok for the full context once it crosses the threshold, $15/Mtok otherwise — Ultra's 125k drops below the tier). Token counts are char-based approximations, within ~10% of Anthropic's tokenizer.
+Cost uses Opus 4.6's 200k+ input rate ($30/Mtok once context crosses the threshold, $15/Mtok otherwise — Ultra's 125k drops below the tier). Token counts are char-based approximations within ~10% of Anthropic's tokenizer.
 
 ## When to trim
 

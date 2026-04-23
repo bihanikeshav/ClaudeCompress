@@ -3,7 +3,6 @@ import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TrimOptions } from "./types.ts";
-import { applyRuleToText, matchRule } from "./rules.ts";
 
 const TRIM_MARKER = "[TRIMMED by claudecompress] ";
 const REDACT_PLACEHOLDER = "";
@@ -18,55 +17,15 @@ function redactToolResult(blk: any): any {
   return out;
 }
 
-function truncateToolResult(blk: any, maxChars: number): any {
-  const content = blk.content;
-  if (typeof content === "string") {
-    if (content.length > maxChars) {
-      return {
-        ...blk,
-        content:
-          content.slice(0, maxChars) +
-          `\n\n[... ${content.length - maxChars} chars trimmed by claudecompress]`,
-      };
-    }
-    return blk;
-  }
-  if (Array.isArray(content)) {
-    const newList = content.map((b: any) => {
-      if (!b || typeof b !== "object") return b;
-      if (b.type === "text" && typeof b.text === "string" && b.text.length > maxChars) {
-        return {
-          ...b,
-          text:
-            b.text.slice(0, maxChars) +
-            `\n\n[... ${b.text.length - maxChars} chars trimmed]`,
-        };
-      }
-      if (b.type === "image") return null;
-      return b;
-    }).filter(Boolean);
-    return { ...blk, content: newList };
-  }
-  return blk;
-}
-
-function stripImage(): null {
-  return null;
-}
-
-function trimRecordRedact(rec: any, newSid: string, keepChars?: number): any | null {
+function trimRecordRedact(rec: any, newSid: string): any | null {
   const out = { ...rec };
   if ("sessionId" in out) out.sessionId = newSid;
   const msg = out.message;
   if (msg && typeof msg === "object" && Array.isArray(msg.content)) {
     const newContent = msg.content.map((blk: any) => {
       if (!blk || typeof blk !== "object") return blk;
-      if (blk.type === "tool_result") {
-        return keepChars === undefined
-          ? redactToolResult(blk)
-          : truncateToolResult(blk, keepChars);
-      }
-      if (blk.type === "image") return stripImage();
+      if (blk.type === "tool_result") return redactToolResult(blk);
+      if (blk.type === "image") return null;
       return blk;
     }).filter(Boolean);
     out.message = { ...msg, content: newContent };
@@ -74,59 +33,150 @@ function trimRecordRedact(rec: any, newSid: string, keepChars?: number): any | n
   return out;
 }
 
-function smartTrimResult(blk: any, toolName: string | undefined): any {
-  const rule = matchRule(toolName ?? "*");
-  if (rule.action.kind === "keep") return blk;
-  if (rule.action.kind === "redact") return redactToolResult(blk);
+// ---------------------------------------------------------------------------
+// Banded per-component trimming (Sift and Distill)
+// ---------------------------------------------------------------------------
 
-  const content = blk.content;
-  if (typeof content === "string") {
-    const trimmed = applyRuleToText(content, rule.action);
-    if (trimmed === content) return blk;
-    return { ...blk, content: trimmed };
+type BandAction =
+  | { kind: "keep" }
+  | { kind: "truncate"; chars: number }
+  | { kind: "drop" };
+
+type ComponentKey =
+  | "user_text"
+  | "assistant_text"
+  | "thinking"
+  | "tool_use"
+  | "tool_result_read"
+  | "tool_result_bash"
+  | "tool_result_grep"
+  | "tool_result_edit"
+  | "tool_result_agent"
+  | "tool_result_mcp_browser"
+  | "tool_result_web"
+  | "tool_result_other";
+
+type BandRules = Record<ComponentKey, [BandAction, BandAction, BandAction]>;
+//                                     band 0         band 1         band 2
+//                                     (0-5 turns)    (6-15)         (16+)
+
+const KEEP: BandAction = { kind: "keep" };
+const DROP: BandAction = { kind: "drop" };
+const T = (chars: number): BandAction => ({ kind: "truncate", chars });
+
+const DISTILL_RULES: BandRules = {
+  user_text:                [KEEP, KEEP, T(600)],
+  assistant_text:           [T(800), T(300), DROP],
+  thinking:                 [T(500), DROP, DROP],
+  tool_use:                 [KEEP, KEEP, KEEP], // name+args kept as skeleton
+  tool_result_read:         [T(1500), T(300), DROP],
+  tool_result_bash:         [T(800), T(200), DROP],
+  tool_result_grep:         [T(400), DROP, DROP],
+  tool_result_edit:         [T(150), T(80), T(80)],
+  tool_result_agent:        [KEEP, T(600), T(200)],
+  tool_result_mcp_browser:  [T(200), DROP, DROP],
+  tool_result_web:          [T(300), DROP, DROP],
+  tool_result_other:        [T(300), DROP, DROP],
+};
+
+function classifyToolResult(toolName: string | undefined): ComponentKey {
+  if (!toolName) return "tool_result_other";
+  const n = toolName;
+  if (n === "Read") return "tool_result_read";
+  if (n === "Bash") return "tool_result_bash";
+  if (n === "Grep" || n === "Glob" || n === "LS") return "tool_result_grep";
+  if (n === "Edit" || n === "Write" || n === "MultiEdit" || n === "NotebookEdit") return "tool_result_edit";
+  if (n === "Task" || n === "Agent") return "tool_result_agent";
+  if (n === "WebFetch" || n === "WebSearch") return "tool_result_web";
+  if (/^mcp__.*(chrome|playwright|browser)/i.test(n)) return "tool_result_mcp_browser";
+  return "tool_result_other";
+}
+
+function applyBandAction(blk: any, action: BandAction): any | null {
+  if (action.kind === "keep") return blk;
+  if (action.kind === "drop") return null;
+  const n = action.chars;
+  if (blk.type === "text" && typeof blk.text === "string") {
+    return blk.text.length <= n ? blk : { ...blk, text: blk.text.slice(0, n) };
   }
-  if (Array.isArray(content)) {
-    const newList = content.map((b: any) => {
-      if (!b || typeof b !== "object") return b;
-      if (b.type === "text" && typeof b.text === "string") {
-        const nt = applyRuleToText(b.text, rule.action);
-        return nt === b.text ? b : { ...b, text: nt };
-      }
-      if (b.type === "image") return null;
-      return b;
-    }).filter(Boolean);
-    return { ...blk, content: newList };
+  if (blk.type === "thinking" && typeof blk.thinking === "string") {
+    return blk.thinking.length <= n ? blk : { ...blk, thinking: blk.thinking.slice(0, n) };
+  }
+  if (blk.type === "tool_result") {
+    const c = blk.content;
+    if (typeof c === "string") {
+      return c.length <= n ? blk : { ...blk, content: c.slice(0, n) };
+    }
+    if (Array.isArray(c)) {
+      const trimmed = c.map((b: any) => {
+        if (b?.type === "text" && typeof b.text === "string") {
+          return b.text.length <= n ? b : { ...b, text: b.text.slice(0, n) };
+        }
+        if (b?.type === "image") return null;
+        return b;
+      }).filter(Boolean);
+      return { ...blk, content: trimmed };
+    }
   }
   return blk;
 }
 
-function trimRecordSmart(
+function trimRecordBanded(
   rec: any,
   newSid: string,
+  band: 0 | 1 | 2,
   toolUseNames: Map<string, string>,
 ): any | null {
+  const rules = DISTILL_RULES;
+  const t = rec?.type;
+  if (t !== "user" && t !== "assistant") {
+    // Meta records (attachments, snapshots, etc.) — drop when older, keep recent
+    return band === 0 ? { ...rec, ...(rec.sessionId ? { sessionId: newSid } : {}) } : null;
+  }
   const out = { ...rec };
   if ("sessionId" in out) out.sessionId = newSid;
   const msg = out.message;
-  if (!msg || typeof msg !== "object" || !Array.isArray(msg.content)) return out;
+  if (!msg || typeof msg !== "object") return out;
 
-  // First pass on this record: capture any tool_use names it introduces.
-  for (const blk of msg.content) {
-    if (blk?.type === "tool_use" && blk.id && blk.name) {
-      toolUseNames.set(blk.id, blk.name);
+  // Capture tool_use → name mapping before we trim blocks.
+  if (Array.isArray(msg.content)) {
+    for (const blk of msg.content) {
+      if (blk?.type === "tool_use" && blk.id && blk.name) {
+        toolUseNames.set(blk.id, blk.name);
+      }
     }
   }
 
-  const newContent = msg.content.map((blk: any) => {
-    if (!blk || typeof blk !== "object") return blk;
-    if (blk.type === "tool_result") {
-      const name = toolUseNames.get(blk.tool_use_id);
-      return smartTrimResult(blk, name);
+  const isUser = rec.type === "user";
+
+  if (typeof msg.content === "string") {
+    const key: ComponentKey = isUser ? "user_text" : "assistant_text";
+    const action = rules[key][band];
+    if (action.kind === "drop") return null;
+    if (action.kind === "truncate" && msg.content.length > action.chars) {
+      out.message = { ...msg, content: msg.content.slice(0, action.chars) };
     }
-    if (blk.type === "image") return stripImage();
-    return blk;
-  }).filter(Boolean);
-  out.message = { ...msg, content: newContent };
+    return out;
+  }
+
+  if (Array.isArray(msg.content)) {
+    const newContent: any[] = [];
+    for (const blk of msg.content) {
+      if (!blk || typeof blk !== "object") { newContent.push(blk); continue; }
+      let key: ComponentKey;
+      if (blk.type === "text") key = isUser ? "user_text" : "assistant_text";
+      else if (blk.type === "thinking") key = "thinking";
+      else if (blk.type === "tool_use") key = "tool_use";
+      else if (blk.type === "tool_result") key = classifyToolResult(toolUseNames.get(blk.tool_use_id));
+      else if (blk.type === "image") continue; // always drop
+      else { newContent.push(blk); continue; }
+      const action = rules[key][band];
+      const applied = applyBandAction(blk, action);
+      if (applied !== null) newContent.push(applied);
+    }
+    if (newContent.length === 0) return null;
+    out.message = { ...msg, content: newContent };
+  }
   return out;
 }
 
@@ -265,10 +315,19 @@ export async function trimSession(
   let lastKeptUuid: string | null = null;
   const toolUseNames = new Map<string, string>();
 
+  // Recency and focus both need a cutoff; ultra doesn't (it nukes everything).
   const needsCutoff = opts.mode === "recency" || opts.mode === "focus";
   const cutoffRecordIdx = needsCutoff
-    ? findRecencyCutoffRecordIndex(inputPath, opts.keepLastN ?? 15)
+    ? findRecencyCutoffRecordIndex(inputPath, opts.keepLastN ?? 5)
     : 0;
+
+  // Distill uses two cutoffs for three bands:
+  //   band 0: <= 5 user turns back
+  //   band 1: 6–15 user turns back
+  //   band 2: 16+ user turns back
+  const isBanded = opts.mode === "distill";
+  const band0Cutoff = isBanded ? findRecencyCutoffRecordIndex(inputPath, 5) : 0;
+  const band1Cutoff = isBanded ? findRecencyCutoffRecordIndex(inputPath, 15) : 0;
 
   // Preserve thinking blocks within the last N user turns regardless of mode.
   // On Opus 4.5+, thinking blocks are preserved by default (see Anthropic's
@@ -299,25 +358,26 @@ export async function trimSession(
       if (!newRec) continue;
       newRec.parentUuid = lastKeptUuid;
       lastKeptUuid = newRec.uuid ?? lastKeptUuid;
-    } else if (opts.mode === "smart") {
-      newRec = trimRecordSmart(rec, newSid, toolUseNames);
-      if (!newRec) continue;
     } else if (opts.mode === "recency") {
       newRec = inRecent
         ? { ...rec, ...(rec.sessionId ? { sessionId: newSid } : {}) }
         : trimRecordRedact(rec, newSid);
       if (!newRec) continue;
-    } else if (opts.mode === "focus") {
+    } else if (opts.mode === "distill") {
+      const band: 0 | 1 | 2 =
+        recordIdx >= band0Cutoff ? 0
+        : recordIdx >= band1Cutoff ? 1
+        : 2;
+      newRec = trimRecordBanded(rec, newSid, band, toolUseNames);
+      if (!newRec) continue;
+    } else {
+      // focus
       const isTurn = rec.type === "user" || rec.type === "assistant";
-
       if (!isTurn) {
-        // Meta records (attachments, snapshots, queue ops, etc.) — drop them
-        // in the trimmed phase, keep verbatim once we're past the cutoff.
         if (!inRecent) continue;
         newRec = { ...rec };
         if ("sessionId" in newRec) newRec.sessionId = newSid;
       } else if (!inRecent) {
-        // Old phase: dialog-only trail.
         newRec = ultraTrimRecord(rec, newSid);
         if (!newRec) continue;
         newRec.parentUuid = lastKeptUuid;
@@ -327,15 +387,10 @@ export async function trimSession(
         newRec.parentUuid = lastKeptUuid ?? newRec.parentUuid ?? null;
         lastKeptUuid = newRec.uuid ?? lastKeptUuid;
       }
-    } else {
-      newRec = trimRecordRedact(
-        rec,
-        newSid,
-        opts.mode === "truncate" ? opts.keepChars : undefined,
-      );
-      if (!newRec) continue;
     }
-    if (opts.dropThinking && opts.mode !== "ultra") {
+    // drop-thinking applies only to recency/focus — sift/distill handle thinking
+    // in their per-band rules, and ultra strips everything structural anyway.
+    if (opts.dropThinking && (opts.mode === "recency" || opts.mode === "focus")) {
       const inThinkingWindow = recordIdx >= thinkingCutoffIdx;
       if (!inThinkingWindow) {
         newRec = dropThinkingBlocks(newRec);

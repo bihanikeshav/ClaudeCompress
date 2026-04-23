@@ -632,20 +632,47 @@
               </tr>
             </thead>
             <tbody>
-              <tr><td class="mode-cell">Smart</td><td>17.9%</td><td class="keeps">low</td><td>Read-heavy session, want light touch</td></tr>
-              <tr><td class="mode-cell">Recency 15</td><td>26.7%</td><td class="keeps">low</td><td>Long session, wide recent context matters</td></tr>
               <tr><td class="mode-cell">Recency 5 (default)</td><td>32.8%</td><td class="keeps">low</td><td>Continuing the same task — research-aligned</td></tr>
-              <tr><td class="mode-cell">Redact</td><td>36.7%</td><td class="trims">med</td><td>Session cleanup (drops recent tool_results too)</td></tr>
-              <tr><td class="mode-cell">Focus 15</td><td>57.1%</td><td class="trims">med</td><td>Pivoting topics, old breadcrumbs = noise</td></tr>
-              <tr><td class="mode-cell">Focus 5</td><td>71.5%</td><td class="trims">med</td><td>Big session, cost-sensitive, accept untested trim</td></tr>
+              <tr><td class="mode-cell">Distill</td><td>45.3%</td><td class="keeps">low-med</td><td>Middle ground — per-component truncation, skeleton survives</td></tr>
+              <tr><td class="mode-cell">Focus 5</td><td>71.5%</td><td class="trims">med</td><td>Big session, cost-sensitive, pivoting topics</td></tr>
               <tr><td class="mode-cell">Ultra</td><td>83.5%</td><td class="drops">high</td><td>Archival — not for continuing work</td></tr>
             </tbody>
           </table>
         </div>
 
-        <p class="caption">Quality risk is qualitative: Recency sits closest to the JetBrains observation-masking pattern (tested at scale). Focus drops older <code>tool_use</code> metadata — not proven worse, but outside what the paper validated. Redact drops <em>recent</em> tool_result bodies too, which kills the working state of the last turn.</p>
+        <p class="caption">Quality risk is qualitative. Recency sits closest to JetBrains' observation-masking pattern (tested at scale). Distill applies per-component rules by turn depth: Read results drop after 15 turns, Bash truncates, Agent results survive longer (they're pre-summarized), <code>tool_use</code> metadata always stays as a skeleton. Focus drops older <code>tool_use</code> metadata — not proven worse, but outside what the paper validated.</p>
 
-        <p class="intro" style="margin-top: 1.4rem"><strong style="color:var(--fg-soft);font-weight:500">Counter-case for Focus.</strong> Chroma's Context Rot study finds that semantically-similar-but-irrelevant tokens actively mislead models (distractor interference). In a session where you've pivoted topic (e.g., finished the auth refactor, now working on the billing module), retained stale tool_use calls with old file paths become textbook distractors. JetBrains tested on SWE-bench where older tool calls stay topic-relevant; in pivot-heavy sessions Focus's more aggressive trimming could plausibly help. There's no public benchmark that directly measures this — Recency is the safer default because it matches a tested pattern, not because Focus is proven-worse.</p>
+        <p class="intro" style="margin-top: 1.4rem"><strong style="color:var(--fg-soft);font-weight:500">Counter-case for Focus.</strong> Chroma's Context Rot study finds that semantically-similar-but-irrelevant tokens actively mislead models (distractor interference). In a session where you've pivoted topic, retained stale tool_use calls with old file paths become textbook distractors. JetBrains tested on SWE-bench where older tool calls stay topic-relevant; in pivot-heavy sessions Focus's more aggressive trimming could plausibly help. There's no public benchmark that directly measures this — Recency is the safer default because it matches a tested pattern, not because Focus is proven-worse.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="sec-tag">Distill rule table</div>
+        <h2>Per-component, per-depth.</h2>
+        <p class="intro">Distill's rules derive from the relevance curves above. High-relevance components (user text, <code>tool_use</code> metadata) survive at all depths. Steep-decay components (Read, Bash, Grep results) truncate in the middle band and drop in the tail. Pre-summarized components (Agent results) survive longer because they're already condensed.</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Component</th><th>0-5 turns</th><th>6-15 turns</th><th>16+ turns</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="mode-cell">User text</td><td class="keeps">keep</td><td class="keeps">keep</td><td>truncate 600</td></tr>
+              <tr><td class="mode-cell">Assistant text</td><td>truncate 800</td><td>truncate 300</td><td class="drops">drop</td></tr>
+              <tr><td class="mode-cell">Thinking (Opus 4.5+)</td><td>truncate 500</td><td class="drops">drop</td><td class="drops">drop</td></tr>
+              <tr><td class="mode-cell"><code>tool_use</code> (name + args)</td><td class="keeps">keep</td><td class="keeps">keep</td><td class="keeps">keep</td></tr>
+              <tr><td class="mode-cell">Read results</td><td>truncate 1500</td><td>truncate 300</td><td class="drops">drop</td></tr>
+              <tr><td class="mode-cell">Bash results</td><td>truncate 800</td><td>truncate 200</td><td class="drops">drop</td></tr>
+              <tr><td class="mode-cell">Grep / Glob</td><td>truncate 400</td><td class="drops">drop</td><td class="drops">drop</td></tr>
+              <tr><td class="mode-cell">Edit confirmations</td><td>truncate 150</td><td>truncate 80</td><td>truncate 80</td></tr>
+              <tr><td class="mode-cell">Agent results</td><td class="keeps">keep</td><td>truncate 600</td><td>truncate 200</td></tr>
+              <tr><td class="mode-cell">MCP browser</td><td>truncate 200</td><td class="drops">drop</td><td class="drops">drop</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="caption">Values are char limits for <code>truncate N</code>. <code>tool_use</code> always kept so the skeleton of what-files-were-touched survives at any depth — the key differentiator vs Focus. Recent turns (last 5) still get truncation on long content (thinking, big assistant text) because model state is rarely load-bearing on long prose blocks. Images always drop.</p>
       </div>
     </section>
 

@@ -1,4 +1,10 @@
-export type TrimMode = "ultra" | "redact" | "truncate" | "smart" | "recency" | "focus";
+export type TrimMode = "ultra" | "recency" | "focus" | "distill";
+
+/**
+ * Legacy modes kept parseable so old slash commands don't silently fail.
+ * The hook maps any legacy mode to `recency` and prints a deprecation note.
+ */
+export type LegacyTrimMode = "redact" | "smart" | "truncate" | "sift";
 
 export interface TrimOptions {
   mode: TrimMode;

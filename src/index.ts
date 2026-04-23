@@ -167,12 +167,10 @@ async function estimateModeSavings(
   const baseCost = estimateColdResumeCost(baseTokens, model);
 
   const jobs: { key: string; opts: TrimOptions }[] = [
-    { key: "redact", opts: { mode: "redact", dropThinking: true } },
     { key: "recency", opts: { mode: "recency", keepLastN: defaultN, dropThinking: true } },
+    { key: "distill", opts: { mode: "distill" } },
     { key: "focus", opts: { mode: "focus", keepLastN: defaultN, dropThinking: true } },
-    { key: "smart", opts: { mode: "smart", dropThinking: true } },
     { key: "ultra", opts: { mode: "ultra" } },
-    { key: "truncate", opts: { mode: "truncate", keepChars: 400, dropThinking: true } },
   ];
 
   const out: Record<string, { after: number; saved: number }> = {};
@@ -221,12 +219,8 @@ async function pickMode(
         label: `${pc.blue("Recency")}  ${pc.green("★")} ${pc.dim("keep last N verbatim, observation-mask older (research-aligned)")}${savingsTag("recency")}`,
       },
       {
-        value: "smart",
-        label: `${pc.magenta("Smart")}  ${pc.dim("per-tool rules — Read heads, Bash errors, full TodoWrite")}${savingsTag("smart")}`,
-      },
-      {
-        value: "redact",
-        label: `${pc.yellow("Redact")}  ${pc.dim("drop ALL tool_result bodies (incl recent) — session cleanup")}${savingsTag("redact")}`,
+        value: "distill",
+        label: `${pc.yellow("Distill")}  ${pc.dim("per-component rules — middle ground, tool skeleton survives at depth")}${savingsTag("distill")}`,
       },
       {
         value: "focus",
@@ -234,11 +228,7 @@ async function pickMode(
       },
       {
         value: "ultra",
-        label: `${pc.green("Ultra")}  ${pc.dim("nuclear — dialog only, tool calls/results/thinking all dropped")}${savingsTag("ultra")}`,
-      },
-      {
-        value: "truncate",
-        label: `${pc.cyan("Truncate")}  ${pc.dim("manual — keep first N chars of every tool_result")}${savingsTag("truncate")}`,
+        label: `${pc.green("Ultra")}  ${pc.dim("archival — dialog only, tool calls/results/thinking all dropped")}${savingsTag("ultra")}`,
       },
     ],
   });
@@ -246,19 +236,7 @@ async function pickMode(
 
   let baseOpts: TrimOptions = { mode: mode as TrimMode };
 
-  if (mode === "truncate") {
-    const raw = await p.text({
-      message: "Chars to keep per tool_result",
-      placeholder: "400",
-      initialValue: "400",
-      validate: (v) => {
-        const n = Number(v);
-        if (!Number.isFinite(n) || n <= 0) return "Enter a positive number";
-      },
-    });
-    if (p.isCancel(raw)) return null;
-    baseOpts = { mode: "truncate", keepChars: Number(raw) };
-  } else if (mode === "recency" || mode === "focus") {
+  if (mode === "recency" || mode === "focus" || mode === "sift" || mode === "distill") {
     const raw = await p.text({
       message: "How many recent user turns (your messages) to keep verbatim?",
       placeholder: String(defaultN),
