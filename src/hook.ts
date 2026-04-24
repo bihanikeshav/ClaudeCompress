@@ -15,6 +15,7 @@ import { encodeCwd } from "./paths.ts";
 import { trimSession } from "./trimmer.ts";
 import { estimateSessionTokens } from "./analyzer.ts";
 import { estimateColdResumeCost, findModel, formatUSD, type ModelInfo } from "./pricing.ts";
+import { logError, logEvent } from "./errorLog.ts";
 import type { TrimMode, TrimOptions } from "./types.ts";
 
 interface HookInput {
@@ -128,6 +129,12 @@ function resolveSessionFile(input: HookInput): string | null {
     }
   }
   // Emit a diagnostic log so the user can see what paths we tried.
+  logError("hook.resolveSessionFile", new Error("session file not found"), {
+    transcript_path: tp,
+    cwd: input.cwd,
+    session_id: input.session_id,
+    tried,
+  });
   try {
     const logPath = join(homedir(), ".claude", "claudecompress", "hook-debug.log");
     writeFileSync(
@@ -139,7 +146,9 @@ function resolveSessionFile(input: HookInput): string | null {
         `tried:\n  ${tried.join("\n  ")}\n---\n`,
       { flag: "a" },
     );
-  } catch {}
+  } catch (err) {
+    logError("hook.resolveSessionFile.writeDebug", err);
+  }
   return null;
 }
 
@@ -251,6 +260,13 @@ async function runCompressHook(
   input: HookInput,
   opts: TrimOptions & { force?: boolean; legacyMode?: string; renamedFrom?: string },
 ): Promise<void> {
+  logEvent("hook.runCompressHook", "compress hook invoked", {
+    mode: opts.mode,
+    keepLastN: opts.keepLastN,
+    dropThinking: opts.dropThinking,
+    force: opts.force,
+    under_ccw: Boolean(process.env.CCW_SIGNAL_FILE),
+  });
   const sessionFile = resolveSessionFile(input);
   if (!sessionFile) {
     process.stderr.write("[claudecompress] could not locate active session JSONL\n");
@@ -335,6 +351,7 @@ async function runCompressHook(
       process.exit(2);
     } catch (err) {
       // Signal write failed — fall through and trim inline as best-effort.
+      logError("hook.runCompressHook.signalWrite", err, { signalFile, sessionFile });
       process.stderr.write(
         `[claudecompress] warning: couldn't write ccw signal (${String(err instanceof Error ? err.message : err)}); trimming inline\n`,
       );
@@ -381,6 +398,7 @@ async function runCompressHook(
     process.stderr.write(lines.join("\n"));
     process.exit(2);
   } catch (err) {
+    logError("hook.runCompressHook.inlineTrim", err, { sessionFile, mode: opts.mode });
     process.stderr.write(
       `[claudecompress] error: ${String(err instanceof Error ? err.message : err)}\n`,
     );
@@ -503,7 +521,8 @@ export async function runHook(): Promise<void> {
     let input: HookInput = {};
     try {
       input = JSON.parse(raw);
-    } catch {
+    } catch (err) {
+      logError("hook.runHook.parseInput", err, { rawLength: raw.length });
       process.exit(0);
     }
 
@@ -527,6 +546,7 @@ export async function runHook(): Promise<void> {
     // user sees WHY the hook failed instead of a silent "non-blocking
     // status code" from Claude Code. Also persist to the debug log so the
     // error survives past Claude Code's UI, which may swallow stderr.
+    logError("hook.runHook", err);
     const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
     process.stderr.write(`[claudecompress] hook crashed:\n${msg}\n`);
     try {
@@ -535,7 +555,9 @@ export async function runHook(): Promise<void> {
         `CRASH ${new Date().toISOString()}\n${msg}\n---\n`,
         { flag: "a" },
       );
-    } catch {}
+    } catch (writeErr) {
+      logError("hook.runHook.writeDebug", writeErr);
+    }
     process.exit(2);
   }
 }

@@ -496,7 +496,7 @@
     <div class="wrap">
       <span class="brand"><span class="mark">◉</span><a href="../">claudecompress</a></span>
       <span class="meta">
-        <span id="npm-version" data-version-sync>v0.16.5</span>
+        <span id="npm-version" data-version-sync>v0.16.6</span>
         <span class="dot-sep">·</span>
         <a href="./" class="current" aria-current="page">theory</a>
         <span class="dot-sep">·</span>
@@ -796,18 +796,7 @@
   <script>
     const REDUCE_MOTION = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    (async () => {
-      const el = document.getElementById("npm-version");
-      if (!el) return;
-      try {
-        const r = await fetch("https://registry.npmjs.org/claudecompress/latest", { cache: "no-store" });
-        if (!r.ok) return;
-        const { version } = await r.json();
-        if (version) el.textContent = "v" + version;
-      } catch {}
-    })();
-
-    if (!REDUCE_MOTION && "IntersectionObserver" in window) {
+if (!REDUCE_MOTION && "IntersectionObserver" in window) {
       const revealIO = new IntersectionObserver((entries) => {
         for (const entry of entries) {
           if (entry.isIntersecting) {

@@ -16,6 +16,7 @@ import { trimSession } from "./trimmer.ts";
 import { estimateSessionTokens } from "./analyzer.ts";
 import { findModel } from "./pricing.ts";
 import { countTokensForSession, roughContextTokens } from "./tokenCounter.ts";
+import { logError, logEvent } from "./errorLog.ts";
 import type { TrimMode, TrimOptions, TrimResult } from "./types.ts";
 
 /**
@@ -79,11 +80,13 @@ function killTree(pid: number): void {
   if (process.platform === "win32") {
     try {
       spawnSync("taskkill", ["/F", "/T", "/PID", String(pid)], { stdio: "ignore" });
-    } catch {
-      // ignore
+    } catch (err) {
+      logError("ccw.killTree", err, { pid });
     }
   } else {
-    try { process.kill(pid, "SIGTERM"); } catch {}
+    try { process.kill(pid, "SIGTERM"); } catch (err) {
+      logError("ccw.killTree", err, { pid });
+    }
   }
 }
 
@@ -134,6 +137,7 @@ function runClaude(args: string[]): Promise<number> {
     child.on("error", (err) => {
       armed = false;
       clearInterval(watcher);
+      logError("ccw.runClaude", err, { cmd, args });
       process.stderr.write(
         `[ccw] failed to spawn ${cmd}: ${err.message}\n` +
           `      is ${cmd === "claude" ? "the Claude Code CLI" : `\`${cmd}\``} on your PATH?\n` +
@@ -248,8 +252,9 @@ function scrubLastAssistantCacheUsage(outPath: string): void {
       writeFileSync(outPath, lines.join("\n"), "utf8");
       return;
     }
-  } catch {
+  } catch (err) {
     // Non-fatal: status line will just lie until first real request.
+    logError("ccw.scrubLastAssistantCacheUsage", err, { outPath });
   }
 }
 
@@ -375,6 +380,7 @@ async function tokensFor(path: string): Promise<{
     const r = await countTokensForSession(path);
     return { contextLike, apiCost: r.inputTokens, approx: false };
   } catch (err) {
+    logError("ccw.tokensFor.countTokens", err, { path });
     const model = findModel("claude-opus-4-7")!;
     return { contextLike, apiCost: estimateSessionTokens(path, model), approx: true };
   }
@@ -382,6 +388,14 @@ async function tokensFor(path: string): Promise<{
 
 async function performPendingTrim(sig: PendingTrimSignal): Promise<string | null> {
   const shortOrig = basename(sig.session, ".jsonl").slice(0, 8);
+  logEvent("ccw.performPendingTrim", "compress start", {
+    session: sig.session,
+    shortOrig,
+    mode: sig.opts.mode,
+    keepLastN: sig.opts.keepLastN,
+    dropThinking: sig.opts.dropThinking,
+    force: sig.opts.force,
+  });
   process.stdout.write(`\n[ccw] compressing ${shortOrig}… (mode: ${sig.opts.mode})\n`);
   try {
     const tb = await tokensFor(sig.session);
@@ -397,21 +411,39 @@ async function performPendingTrim(sig: PendingTrimSignal): Promise<string | null
       : Math.round(((tokensBefore - tokensAfter) / tokensBefore) * 1000) / 10;
     try {
       scrubLastAssistantCacheUsage(result.path);
-    } catch {
+    } catch (err) {
       // Non-fatal — proceed with rehydrate turn.
+      logError("ccw.performPendingTrim.scrub", err, { path: result.path });
     }
     try {
       appendRehydrateTurn(result.path, result, sig.opts, tokensBefore, tokensAfter, tokenReductionPct, approx, apiBefore, apiAfter);
     } catch (err) {
       // Non-fatal — the trimmed session still resumes fine without
       // auto-rehydration; the user just has to type the first message.
+      logError("ccw.performPendingTrim.rehydrate", err, {
+        path: result.path,
+        newSessionId: result.newSessionId,
+      });
       process.stderr.write(
         `[ccw] note: could not append rehydrate turn (${String(err instanceof Error ? err.message : err)})\n`,
       );
     }
     printCompressBanner(result, sig.opts, shortOrig, tokensBefore, tokensAfter, tokenReductionPct, approx, apiBefore, apiAfter);
+    logEvent("ccw.performPendingTrim", "compress success", {
+      originalLines: result.originalLines,
+      trimmedLines: result.trimmedLines,
+      tokensBefore,
+      tokensAfter,
+      apiBefore,
+      apiAfter,
+      newSessionId: result.newSessionId,
+    });
     return result.newSessionId;
   } catch (err) {
+    logError("ccw.performPendingTrim", err, {
+      session: sig.session,
+      mode: sig.opts.mode,
+    });
     process.stderr.write(
       `[ccw] compress failed: ${String(err instanceof Error ? err.message : err)}\n` +
         `[ccw] resuming ORIGINAL (uncompressed) session instead\n`,
@@ -437,6 +469,7 @@ async function main(): Promise<void> {
   ensureDir();
   clearSignal();
   const originalArgs = expandShortcuts(process.argv.slice(2));
+  logEvent("ccw.main", "ccw started", { argv: originalArgs });
   let args = originalArgs;
   // eslint-disable-next-line no-constant-condition
   while (true) {
@@ -454,6 +487,7 @@ async function main(): Promise<void> {
     }
     if (!hash) process.exit(code);
 
+    logEvent("ccw.main", "resume", { hash });
     process.stdout.write(
       `[ccw] resuming compressed session ${hash}\n` +
       `[ccw] cache is COLD — send any message to rehydrate (the /context cache indicator will lie until you do)\n\n`,
@@ -463,6 +497,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
+  logError("ccw.main", err);
   process.stderr.write(
     `[ccw] ${String(err instanceof Error ? err.message : err)}\n`,
   );

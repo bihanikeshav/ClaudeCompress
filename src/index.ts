@@ -23,6 +23,7 @@ import {
   type ModelInfo,
 } from "./pricing.ts";
 import { recordTrim, summarizeHistory, readHistory } from "./history.ts";
+import { logError } from "./errorLog.ts";
 
 function cacheTag(state: CacheState, label: string): string {
   if (state === "warm") return pc.red(`warm · ${label}`);
@@ -180,9 +181,12 @@ async function estimateModeSavings(
       const afterTokens = estimateSessionTokens(outPath, model);
       const afterCost = estimateColdResumeCost(afterTokens, model);
       out[key] = { after: afterCost, saved: Math.max(0, baseCost - afterCost) };
-      try { unlinkSync(outPath); } catch {}
-    } catch {
+      try { unlinkSync(outPath); } catch (err) {
+        logError("index.estimateModeSavings.unlink", err, { key });
+      }
+    } catch (err) {
       // skip mode on error
+      logError("index.estimateModeSavings", err, { key, mode: opts.mode });
     }
   }
   return out;
@@ -456,6 +460,7 @@ async function main() {
 }
 
 main().catch((err) => {
+  logError("index.main", err, { argv: process.argv.slice(2) });
   p.log.error(String(err?.stack ?? err));
   process.exit(1);
 });
