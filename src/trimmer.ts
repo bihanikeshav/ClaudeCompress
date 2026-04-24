@@ -1,8 +1,8 @@
-import { createReadStream, createWriteStream, readFileSync } from "node:fs";
+import { createReadStream, createWriteStream, readFileSync, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { TrimOptions } from "./types.ts";
+import type { TrimOptions, TrimResult } from "./types.ts";
 import { squashToolResult, squashToolUseInput } from "./squash.ts";
 
 const REDACT_PLACEHOLDER = "";
@@ -303,7 +303,7 @@ function dropThinkingBlocks(rec: any): any | null {
 export async function trimSession(
   inputPath: string,
   opts: TrimOptions,
-): Promise<string> {
+): Promise<TrimResult> {
   const newSid = randomUUID();
   const outPath = join(dirname(inputPath), `${newSid}.jsonl`);
 
@@ -315,6 +315,9 @@ export async function trimSession(
 
   let marked = false;
   let lastKeptUuid: string | null = null;
+  // Stats — we count input lines during prescan and output lines as we write.
+  let originalLines = 0;
+  let trimmedLines = 0;
   const toolUseNames = new Map<string, string>();
   const toolUseInputs = new Map<string, any>();
 
@@ -335,6 +338,7 @@ export async function trimSession(
     for (const line of data.split("\n")) {
       if (!line) continue;
       recIdx += 1;
+      originalLines += 1;
       try {
         const rec = JSON.parse(line);
         const content = rec?.message?.content;
@@ -499,9 +503,23 @@ export async function trimSession(
       marked = true;
     }
     outStream.write(JSON.stringify(newRec) + "\n");
+    trimmedLines += 1;
   }
   await new Promise<void>((resolve, reject) => {
     outStream.end((err?: Error | null) => (err ? reject(err) : resolve()));
   });
-  return outPath;
+  const originalBytes = statSync(inputPath).size;
+  const trimmedBytes = statSync(outPath).size;
+  const reductionPct = originalBytes === 0
+    ? 0
+    : Math.round(((originalBytes - trimmedBytes) / originalBytes) * 1000) / 10;
+  return {
+    path: outPath,
+    newSessionId: newSid,
+    originalBytes,
+    trimmedBytes,
+    originalLines,
+    trimmedLines,
+    reductionPct,
+  };
 }

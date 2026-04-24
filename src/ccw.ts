@@ -1,13 +1,35 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   readFileSync,
   unlinkSync,
   mkdirSync,
+  statSync,
+  appendFileSync,
+  writeFileSync,
 } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { trimSession } from "./trimmer.ts";
+import { estimateSessionTokens } from "./analyzer.ts";
+import { findModel } from "./pricing.ts";
+import { countTokensForSession, roughContextTokens } from "./tokenCounter.ts";
+import type { TrimMode, TrimOptions, TrimResult } from "./types.ts";
+
+/**
+ * Shape of the signal file produced by the /compress hook when running
+ * under ccw (v0.17+). The hook defers the actual trim work to ccw so it
+ * doesn't have to kill claude from inside a child process — a dance that
+ * was fragile on Windows. ccw reads this after claude exits, runs the
+ * trim, then respawns with --resume.
+ */
+interface PendingTrimSignal {
+  v: 1;
+  session: string;
+  opts: TrimOptions & { force?: boolean; legacyMode?: string; renamedFrom?: string };
+}
 
 const SIGNAL_FILE = join(
   homedir(),
@@ -48,9 +70,27 @@ function resolveClaudeCmd(): string {
   return custom && custom.length > 0 ? custom : "claude";
 }
 
+/**
+ * Kill the entire process tree rooted at `pid`. On Windows we use
+ * taskkill /T because child.kill() only terminates the direct child
+ * and leaves claude's sub-processes (hooks, shells) as orphans.
+ */
+function killTree(pid: number): void {
+  if (process.platform === "win32") {
+    try {
+      spawnSync("taskkill", ["/F", "/T", "/PID", String(pid)], { stdio: "ignore" });
+    } catch {
+      // ignore
+    }
+  } else {
+    try { process.kill(pid, "SIGTERM"); } catch {}
+  }
+}
+
 function runClaude(args: string[]): Promise<number> {
   const cmd = resolveClaudeCmd();
   return new Promise((resolve) => {
+    const startMs = Date.now();
     const child = spawn(cmd, args, {
       stdio: "inherit",
       env: {
@@ -60,8 +100,40 @@ function runClaude(args: string[]): Promise<number> {
       },
       shell: process.platform === "win32" || cmd !== "claude",
     });
-    child.on("exit", (code) => resolve(code ?? 0));
+
+    // Watch the signal file in parallel with the child process.
+    // When the /compress hook writes a signal, we kill claude from
+    // OUT HERE (parent → child, rock-solid on every OS) instead of
+    // asking the hook to suicide its own parent (a mess on Windows).
+    // A short grace period lets the hook finish flushing its banner
+    // to the user before we pull claude down.
+    let armed = true;
+    const watcher = setInterval(() => {
+      if (!armed || !child.pid) return;
+      try {
+        const st = statSync(SIGNAL_FILE);
+        // Only react to a signal written AFTER this claude spawn —
+        // old/stale files from a previous run get ignored.
+        if (st.mtimeMs >= startMs) {
+          armed = false;
+          clearInterval(watcher);
+          setTimeout(() => {
+            if (child.exitCode === null && child.pid) killTree(child.pid);
+          }, 400);
+        }
+      } catch {
+        // file doesn't exist yet → no signal → keep watching
+      }
+    }, 200);
+
+    child.on("exit", (code) => {
+      armed = false;
+      clearInterval(watcher);
+      resolve(code ?? 0);
+    });
     child.on("error", (err) => {
+      armed = false;
+      clearInterval(watcher);
       process.stderr.write(
         `[ccw] failed to spawn ${cmd}: ${err.message}\n` +
           `      is ${cmd === "claude" ? "the Claude Code CLI" : `\`${cmd}\``} on your PATH?\n` +
@@ -111,20 +183,282 @@ function mergeResumeArgs(original: string[], hash: string): string[] {
   return out;
 }
 
+/**
+ * Parse the signal file contents. v0.17+ writes a JSON pending-trim
+ * request; older hooks wrote a plain hash. Accept both for backward
+ * compatibility with mismatched hook/ccw installs.
+ */
+function parseSignal(raw: string): PendingTrimSignal | string {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && parsed.v === 1 && typeof parsed.session === "string" && parsed.opts) {
+        return parsed as PendingTrimSignal;
+      }
+    } catch {
+      // fall through: treat as plain string
+    }
+  }
+  return trimmed;
+}
+
+function formatTokens(n: number): string {
+  if (n < 1000) return `${n} tok`;
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k tok`;
+  return `${(n / 1_000_000).toFixed(2)}M tok`;
+}
+
+/**
+ * Append a synthetic user turn to the trimmed JSONL so that on resume, claude
+ * sees a fresh prompt describing what just happened and produces one assistant
+ * response — which rehydrates the freshly-compressed session. We clone metadata
+ * (cwd, version, userType, permissionMode…) from the last user record found in
+ * the file so the new entry blends in with the rest of the transcript.
+ */
+/**
+ * Zero out cache-related usage fields on the last assistant record in the
+ * trimmed JSONL. Claude Code's status line reads these to decide whether to
+ * show "cache active" — after a trim, the server-side cache keyed on the
+ * original content is stale, so those fields are a lie. Resetting them lets
+ * the UI reflect reality (cold cache) until the next real API call.
+ */
+function scrubLastAssistantCacheUsage(outPath: string): void {
+  try {
+    const data = readFileSync(outPath, "utf8");
+    const lines = data.split("\n");
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const line = lines[i];
+      if (!line) continue;
+      let rec: any;
+      try {
+        rec = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (rec?.type !== "assistant" || !rec?.message?.usage) continue;
+      const u = rec.message.usage;
+      u.cache_creation_input_tokens = 0;
+      u.cache_read_input_tokens = 0;
+      if (u.cache_creation && typeof u.cache_creation === "object") {
+        u.cache_creation.ephemeral_5m_input_tokens = 0;
+        u.cache_creation.ephemeral_1h_input_tokens = 0;
+      }
+      lines[i] = JSON.stringify(rec);
+      writeFileSync(outPath, lines.join("\n"), "utf8");
+      return;
+    }
+  } catch {
+    // Non-fatal: status line will just lie until first real request.
+  }
+}
+
+function appendRehydrateTurn(
+  outPath: string,
+  stats: TrimResult,
+  opts: TrimOptions,
+  tokensBefore: number,
+  tokensAfter: number,
+  tokenReductionPct: number,
+  approx: boolean,
+  apiBefore: number,
+  apiAfter: number,
+): void {
+  const data = readFileSync(outPath, "utf8");
+  const lines = data.split("\n").filter(Boolean);
+  if (lines.length === 0) return;
+
+  // Find the last record (for parent UUID) and the last user record
+  // (for metadata template).
+  let lastRec: any = null;
+  let lastUserTemplate: any = null;
+  for (const line of lines) {
+    try {
+      const rec = JSON.parse(line);
+      lastRec = rec;
+      if (rec?.type === "user" && rec?.message?.role === "user") {
+        lastUserTemplate = rec;
+      }
+    } catch {
+      // skip bad lines
+    }
+  }
+  if (!lastRec || !lastUserTemplate) return;
+
+  const pct = tokenReductionPct.toFixed(1);
+  const apiPct = apiBefore === 0 ? "0.0" : (((apiBefore - apiAfter) / apiBefore) * 100).toFixed(1);
+  const apiTag = approx ? " (est)" : "";
+  const modeStr = `${opts.mode}${opts.dropThinking ? " · drop thinking" : ""}`;
+
+  const content =
+    `<ccw-compressed>\n` +
+    `Session auto-compressed by claudecompress. Earlier tool outputs and ` +
+    `assistant replies were trimmed; user turns are intact.\n` +
+    `\n` +
+    `  /context   ${formatTokens(tokensBefore).padStart(9)}  →  ${formatTokens(tokensAfter).padStart(9)}   (${pct}% smaller)\n` +
+    `  api cost   ${formatTokens(apiBefore).padStart(9)}  →  ${formatTokens(apiAfter).padStart(9)}   (${apiPct}% smaller)${apiTag}\n` +
+    `  messages   ${String(stats.originalLines).padStart(9)}  →  ${String(stats.trimmedLines).padStart(9)}\n` +
+    `  mode       ${modeStr}\n` +
+    `\n` +
+    `Cache is COLD — this reply rebuilds it. Please acknowledge briefly ` +
+    `(no tool calls) and I'll resume normal work on the next turn.\n` +
+    `</ccw-compressed>`;
+
+  const newRec: Record<string, unknown> = {
+    parentUuid: lastRec.uuid ?? null,
+    isSidechain: false,
+    type: "user",
+    message: { role: "user", content },
+    uuid: randomUUID(),
+    timestamp: new Date().toISOString(),
+    userType: "external",
+    sessionId: stats.newSessionId,
+  };
+  // Copy over fields that Claude Code expects but that don't vary turn-to-turn.
+  for (const k of ["cwd", "version", "gitBranch", "entrypoint", "permissionMode"] as const) {
+    if (lastUserTemplate[k] !== undefined) newRec[k] = lastUserTemplate[k];
+  }
+
+  appendFileSync(outPath, JSON.stringify(newRec) + "\n", "utf8");
+}
+
+function printCompressBanner(
+  stats: TrimResult,
+  opts: TrimOptions,
+  shortOrig: string,
+  tokensBefore: number,
+  tokensAfter: number,
+  tokenReductionPct: number,
+  approx: boolean,
+  apiBefore: number,
+  apiAfter: number,
+): void {
+  const pct = tokenReductionPct.toFixed(1);
+  const apiPct = apiBefore === 0 ? "0.0" : (((apiBefore - apiAfter) / apiBefore) * 100).toFixed(1);
+  const short = (sid: string) => sid.slice(0, 8);
+  const bar = "─".repeat(58);
+  const apiLabel = approx ? " (est)" : "";
+  const out = [
+    "",
+    `┌─ ccw compress ${bar.slice(0, 43)}┐`,
+    `  ✓ /context   ${formatTokens(tokensBefore)} → ${formatTokens(tokensAfter)}  (${pct}% smaller)`,
+    `    api cost   ${formatTokens(apiBefore)} → ${formatTokens(apiAfter)}  (${apiPct}% smaller)${apiLabel}`,
+    `  messages     ${stats.originalLines} → ${stats.trimmedLines}`,
+    `  mode         ${opts.mode}${opts.dropThinking ? " · drop thinking" : ""}`,
+    `  session      ${shortOrig}… → ${short(stats.newSessionId)}…`,
+    `  cache        ⚠  COLD — /context may still show stale "active"; send a message to rehydrate`,
+    `└${"─".repeat(59)}┘`,
+    "",
+  ];
+  process.stdout.write(out.join("\n"));
+}
+
+/**
+ * Resolve two token counts for a session JSONL:
+ *   - `contextLike` matches what /context's "Messages" line would show
+ *     (disk-side rough heuristic, calibrated to dormant sessions ~1%).
+ *   - `apiCost` is the real count_tokens result — the actual Anthropic
+ *     bill on the first request after /resume.
+ *
+ * We display contextLike as the headline number (so users see the same
+ * number /context shows) and apiCost as a secondary line so the real
+ * cost is still visible. If the API call fails (no creds, offline), we
+ * fall back to the prose-tuned char estimator and flag `approx=true`.
+ */
+async function tokensFor(path: string): Promise<{
+  contextLike: number;
+  apiCost: number;
+  approx: boolean;
+}> {
+  const contextLike = roughContextTokens(path);
+  try {
+    const r = await countTokensForSession(path);
+    return { contextLike, apiCost: r.inputTokens, approx: false };
+  } catch (err) {
+    const model = findModel("claude-opus-4-7")!;
+    return { contextLike, apiCost: estimateSessionTokens(path, model), approx: true };
+  }
+}
+
+async function performPendingTrim(sig: PendingTrimSignal): Promise<string | null> {
+  const shortOrig = basename(sig.session, ".jsonl").slice(0, 8);
+  process.stdout.write(`\n[ccw] compressing ${shortOrig}… (mode: ${sig.opts.mode})\n`);
+  try {
+    const tb = await tokensFor(sig.session);
+    const result = await trimSession(sig.session, sig.opts);
+    const ta = await tokensFor(result.path);
+    const tokensBefore = tb.contextLike;
+    const tokensAfter = ta.contextLike;
+    const apiBefore = tb.apiCost;
+    const apiAfter = ta.apiCost;
+    const approx = tb.approx || ta.approx;
+    const tokenReductionPct = tokensBefore === 0
+      ? 0
+      : Math.round(((tokensBefore - tokensAfter) / tokensBefore) * 1000) / 10;
+    try {
+      scrubLastAssistantCacheUsage(result.path);
+    } catch {
+      // Non-fatal — proceed with rehydrate turn.
+    }
+    try {
+      appendRehydrateTurn(result.path, result, sig.opts, tokensBefore, tokensAfter, tokenReductionPct, approx, apiBefore, apiAfter);
+    } catch (err) {
+      // Non-fatal — the trimmed session still resumes fine without
+      // auto-rehydration; the user just has to type the first message.
+      process.stderr.write(
+        `[ccw] note: could not append rehydrate turn (${String(err instanceof Error ? err.message : err)})\n`,
+      );
+    }
+    printCompressBanner(result, sig.opts, shortOrig, tokensBefore, tokensAfter, tokenReductionPct, approx, apiBefore, apiAfter);
+    return result.newSessionId;
+  } catch (err) {
+    process.stderr.write(
+      `[ccw] compress failed: ${String(err instanceof Error ? err.message : err)}\n` +
+        `[ccw] resuming ORIGINAL (uncompressed) session instead\n`,
+    );
+    // Fall back to the original session's hash so the user doesn't
+    // lose their conversation when the trim errors.
+    return basename(sig.session, ".jsonl");
+  }
+}
+
+/**
+ * Expand ccw-level shortcuts into real claude flags before we hand args off
+ * to claude. Shortcuts are always rewritten in place so --resume merging and
+ * later respawns carry them forward unchanged.
+ *
+ *   --dsp  →  --dangerously-skip-permissions
+ */
+function expandShortcuts(args: string[]): string[] {
+  return args.map((a) => (a === "--dsp" ? "--dangerously-skip-permissions" : a));
+}
+
 async function main(): Promise<void> {
   ensureDir();
   clearSignal();
-  const originalArgs = process.argv.slice(2);
+  const originalArgs = expandShortcuts(process.argv.slice(2));
   let args = originalArgs;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     const code = await runClaude(args);
-    const next = readSignal();
-    if (!next) process.exit(code);
+    const raw = readSignal();
+    if (!raw) process.exit(code);
+
+    const sig = parseSignal(raw);
+    let hash: string | null;
+    if (typeof sig === "string") {
+      // Legacy plain-hash signal (pre-v0.17 hook).
+      hash = sig;
+    } else {
+      hash = await performPendingTrim(sig);
+    }
+    if (!hash) process.exit(code);
+
     process.stdout.write(
-      `\n[ccw] resuming trimmed session ${next}\n\n`,
+      `[ccw] resuming compressed session ${hash}\n` +
+      `[ccw] cache is COLD — send any message to rehydrate (the /context cache indicator will lie until you do)\n\n`,
     );
-    args = mergeResumeArgs(originalArgs, next);
+    args = mergeResumeArgs(originalArgs, hash);
   }
 }
 

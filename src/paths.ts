@@ -6,11 +6,12 @@ export const CLAUDE_HOME = join(homedir(), ".claude");
 export const PROJECTS_DIR = join(CLAUDE_HOME, "projects");
 
 /**
- * Claude Code encodes project paths by replacing `:`, `/`, and `\` with `-`.
- * Example: `Z:\CC_Resume` → `Z--CC-Resume`
+ * Claude Code encodes project paths by replacing every non-alphanumeric
+ * character with `-`. Underscores included.
+ * Example: `Z:\CC_Resume` → `Z--CC-Resume`   (: → -, \ → -, _ → -)
  */
 export function encodeCwd(cwd: string): string {
-  return cwd.replace(/[:\\/]/g, "-");
+  return cwd.replace(/[^a-zA-Z0-9]/g, "-");
 }
 
 export function projectDirForCwd(cwd: string = process.cwd()): string {

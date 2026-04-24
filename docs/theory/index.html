@@ -77,6 +77,53 @@
     }
     body > * { position: relative; z-index: 1; }
 
+    /* Brand-mark ambient layer. Tiny ring + center dot (the claudecompress
+       aperture) tiled every 28px. Visible in the outer gutters, masked
+       transparent across the central reading column. Drifts slowly (40s)
+       so it reads as alive rather than stamped on. */
+    .bg-plus {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28'><circle cx='14' cy='14' r='2.6' fill='none' stroke='%23e2dcd2' stroke-opacity='0.16' stroke-width='0.8'/><circle cx='14' cy='14' r='0.9' fill='%23e2dcd2' fill-opacity='0.22'/></svg>");
+      background-size: 28px 28px;
+      -webkit-mask-image: linear-gradient(
+        to right,
+        #000 0,
+        #000 max(0%, calc(50% - 960px)),
+        rgba(0, 0, 0, 0.65) max(0%, calc(50% - 820px)),
+        rgba(0, 0, 0, 0.25) max(0%, calc(50% - 700px)),
+        transparent max(0%, calc(50% - 580px)),
+        transparent min(100%, calc(50% + 580px)),
+        rgba(0, 0, 0, 0.25) min(100%, calc(50% + 700px)),
+        rgba(0, 0, 0, 0.65) min(100%, calc(50% + 820px)),
+        #000 min(100%, calc(50% + 960px)),
+        #000 100%
+      );
+              mask-image: linear-gradient(
+        to right,
+        #000 0,
+        #000 max(0%, calc(50% - 960px)),
+        rgba(0, 0, 0, 0.65) max(0%, calc(50% - 820px)),
+        rgba(0, 0, 0, 0.25) max(0%, calc(50% - 700px)),
+        transparent max(0%, calc(50% - 580px)),
+        transparent min(100%, calc(50% + 580px)),
+        rgba(0, 0, 0, 0.25) min(100%, calc(50% + 700px)),
+        rgba(0, 0, 0, 0.65) min(100%, calc(50% + 820px)),
+        #000 min(100%, calc(50% + 960px)),
+        #000 100%
+      );
+      animation: bg-plus-drift 40s linear infinite;
+    }
+    @keyframes bg-plus-drift {
+      from { background-position: 0 0; }
+      to   { background-position: 0 28px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .bg-plus { animation: none; }
+    }
+
     .wrap { max-width: 1120px; margin: 0 auto; padding: 0 clamp(1.15rem, 4vw, 3rem); }
 
     h1, h2 {
@@ -88,8 +135,8 @@
       color: var(--fg);
       font-variation-settings: "opsz" 144, "SOFT" 40;
     }
-    h1 { font-size: clamp(2.1rem, 5vw, 3.8rem); font-weight: 380; letter-spacing: -0.028em; max-width: 22ch; }
-    h2 { font-size: clamp(1.4rem, 3.2vw, 2.2rem); font-weight: 440; max-width: 28ch; }
+    h1 { font-size: clamp(2.1rem, 5vw, 3.8rem); font-weight: 380; letter-spacing: -0.028em; text-wrap: balance; }
+    h2 { font-size: clamp(1.4rem, 3.2vw, 2.2rem); font-weight: 440; text-wrap: balance; }
     .italic { font-family: "Fraunces", serif; font-style: italic; font-weight: 380; font-variation-settings: "opsz" 72, "SOFT" 70; color: var(--brand); }
     .accent { color: var(--accent); }
 
@@ -176,7 +223,6 @@
       margin: 0 0 1.2rem;
     }
     .hero .lede {
-      max-width: 56ch;
       font-size: clamp(1.05rem, 1.3vw, 1.18rem);
       color: var(--fg-soft);
       line-height: 1.58;
@@ -193,7 +239,6 @@
       font-weight: 500;
     }
     .intro {
-      max-width: 64ch;
       color: var(--fg-soft);
       margin: 0 0 1.2rem;
       line-height: 1.65;
@@ -210,7 +255,6 @@
       margin: 1.6rem 0 1.8rem;
       padding: 0.5rem 0 0.5rem 1.3rem;
       border-left: 2px solid var(--accent-soft);
-      max-width: 70ch;
       font-family: "Fraunces", serif;
       font-style: italic;
       font-size: clamp(1.1rem, 1.5vw, 1.25rem);
@@ -300,9 +344,15 @@
     .caption {
       font-size: 0.9rem;
       color: var(--fg-dim);
-      max-width: 68ch;
       margin: 1rem 0 0;
       line-height: 1.55;
+    }
+    /* Captions sitting directly under a chart get the full chart width,
+       not the 68ch measure used for flowing prose — the graph already
+       sets the horizontal scope and the caption should match it. */
+    .chart-wrap > .caption,
+    .chart-wrap + .caption {
+      max-width: none;
     }
     .caption em { font-family: "Fraunces", serif; font-style: italic; color: var(--fg-soft); }
 
@@ -339,7 +389,6 @@
     table td.drops { color: var(--accent); }
 
     ul.prose {
-      max-width: 70ch;
       padding-left: 0;
       list-style: none;
       color: var(--fg-soft);
@@ -442,13 +491,14 @@
   </style>
 </head>
 <body>
+  <div class="bg-plus" aria-hidden="true"></div>
   <header>
     <div class="wrap">
-      <span class="brand"><span class="mark">◉</span><a href="/">claudecompress</a></span>
+      <span class="brand"><span class="mark">◉</span><a href="../">claudecompress</a></span>
       <span class="meta">
         <span id="npm-version">v0.7.0</span>
         <span class="dot-sep">·</span>
-        <a href="/theory/" class="current" aria-current="page">theory</a>
+        <a href="./" class="current" aria-current="page">theory</a>
         <span class="dot-sep">·</span>
         <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
         <span class="dot-sep">·</span>
@@ -460,26 +510,10 @@
   <main>
     <section class="hero">
       <div class="wrap">
-        <a class="back-link" href="/">← back</a>
+        <a class="back-link" href="../">← back</a>
         <div class="kicker">Theory</div>
-        <h1>Why <span class="italic">trimming</span> works.</h1>
-        <p class="lede">User instructions stay relevant for hours. A file you read twenty turns ago is almost certainly stale. Most of a long session is <em>rederivable noise</em> that can be cut without the model losing the thread.</p>
-      </div>
-    </section>
-
-    <section>
-      <div class="wrap">
-        <div class="sec-tag">Central finding</div>
-        <h2>Masking matches summarization. At half the cost.</h2>
-        <p class="intro">JetBrains Research ran a 2025 study on <strong>500 SWE-bench Verified tasks</strong> comparing two ways to shrink an agent's context: send the transcript through an LLM to summarize it, or replace old tool outputs with a short placeholder while keeping the tool name and arguments.</p>
-        <p class="intro">Option 2 won or tied on 4 of 5 model configurations. On Qwen3-Coder 480B, masking scored <strong>54.8% solve rate vs 53.8%</strong> for summarization while being <strong>52% cheaper</strong>. Summarization also caused <em>trajectory elongation</em>: agents ran 15% more turns because summaries smoothed over failure severity.</p>
-
-        <blockquote>
-          "The simple approach of observation masking wasn't just cheaper; it often matched or even slightly beat LLM summarization in solving benchmark tasks."
-          <cite><a href="https://arxiv.org/abs/2508.21433">Lindenbauer &amp; Fraser · JetBrains Research · 2025</a></cite>
-        </blockquote>
-
-        <p class="intro">The paper's formalization is specific: past observations (tool_result bodies) are replaced; agent reasoning and actions (tool_use calls with names and arguments) are preserved verbatim. The <code>safe</code> mode in claudecompress maps to exactly this pattern for older turns. <code>slim</code> goes further and drops the tool_use metadata too — which is outside what the paper validated either way.</p>
+        <h1>Not all tokens <span class="italic">age</span> the same.</h1>
+        <p class="lede">An instruction you typed an hour ago still matters. A file the model read twenty turns ago probably doesn't. Long sessions get expensive because most tools treat both of them as if they still do.</p>
       </div>
     </section>
 
@@ -487,79 +521,102 @@
       <div class="wrap">
         <div class="sec-tag">Relevance decay</div>
         <h2>Every component ages on its own curve.</h2>
-        <p class="intro">Relevance scored 0-100 at turn distance. Pulled from published research where available (JetBrains, Chroma, Anthropic docs), inferred from attention mechanics elsewhere.</p>
 
         <div class="chart-wrap">
           <div class="chart-head">
-            <span>Relevance vs turn distance</span>
+            <span>How context ages</span>
             <span class="x-axis-note">square-root scale — early turns get more room</span>
           </div>
 
-          <svg class="chart" viewBox="0 0 800 380" role="img" aria-label="Relevance decay curves for context components across 100 turns">
+          <svg class="chart" viewBox="0 0 800 380" role="img" aria-label="Relevance decay shapes for different parts of a long agent transcript">
             <g>
-              <line class="grid" x1="60" y1="255" x2="780" y2="255" />
-              <line class="grid" x1="60" y1="180" x2="780" y2="180" />
-              <line class="grid" x1="60" y1="105" x2="780" y2="105" />
-              <line class="axis" x1="60" y1="30" x2="60" y2="330" />
+              <line class="axis" x1="60" y1="40" x2="60" y2="330" />
               <line class="axis" x1="60" y1="330" x2="780" y2="330" />
             </g>
 
-            <g>
-              <text class="tick-label" x="50" y="35" text-anchor="end" dominant-baseline="middle">100</text>
-              <text class="tick-label" x="50" y="108" text-anchor="end" dominant-baseline="middle">75</text>
-              <text class="tick-label" x="50" y="183" text-anchor="end" dominant-baseline="middle">50</text>
-              <text class="tick-label" x="50" y="258" text-anchor="end" dominant-baseline="middle">25</text>
-              <text class="tick-label" x="50" y="333" text-anchor="end" dominant-baseline="middle">0</text>
-            </g>
+            <!-- Y axis: abstract only, no numeric ticks. Relevance direction
+                 communicated by label position + axis arrow convention. -->
+            <text class="axis-label" x="60" y="26" text-anchor="start">Relevance</text>
 
+            <!-- X axis: turn number ticks using sqrt-like spacing so the
+                 first 20 turns get most of the canvas (that's where the
+                 interesting decay happens). -->
             <g>
               <text class="tick-label" x="60"  y="348" text-anchor="middle">0</text>
-              <text class="tick-label" x="132" y="348" text-anchor="middle">1</text>
-              <text class="tick-label" x="162" y="348" text-anchor="middle">2</text>
-              <text class="tick-label" x="221" y="348" text-anchor="middle">5</text>
+              <text class="tick-label" x="220" y="348" text-anchor="middle">5</text>
               <text class="tick-label" x="288" y="348" text-anchor="middle">10</text>
-              <text class="tick-label" x="382" y="348" text-anchor="middle">20</text>
-              <text class="tick-label" x="569" y="348" text-anchor="middle">50</text>
+              <text class="tick-label" x="380" y="348" text-anchor="middle">20</text>
+              <text class="tick-label" x="570" y="348" text-anchor="middle">50</text>
               <text class="tick-label" x="780" y="348" text-anchor="middle">100</text>
             </g>
+            <text class="axis-label" x="780" y="370" text-anchor="end">Turns ago &#8594;</text>
 
-            <text class="axis-label" x="60" y="18" text-anchor="start">Relevance</text>
-            <text class="axis-label" x="780" y="375" text-anchor="end">Turns ago</text>
+            <!-- Smooth cubic Bezier curves. Y values are informed estimates,
+                 not measured — see caption. Higher = more worth keeping.
+                 Curves fall hard in the first 5-10 turns because that's
+                 how tool outputs actually behave — a file read ten
+                 conversational turns ago is nearly always dead weight. -->
 
+            <!-- User text: the only component with a real floor.
+                 Original instructions still matter 100 turns in (~30%),
+                 but mid-session user tweaks decay noticeably. -->
             <path class="line" stroke="#a4c27a"
-              d="M 60,45 L 132,45 L 162,75 L 186,84 L 221,105 L 254,135 L 288,150 L 345,180 L 382,204 L 454,216 L 569,240 L 684,264 L 780,276" />
-            <path class="line" stroke="#e0b45c"
-              d="M 60,75 L 132,75 L 162,165 L 186,174 L 221,195 L 254,246 L 288,270 L 345,285 L 382,300 L 454,309 L 569,321 L 684,324 L 780,324" />
-            <path class="line" stroke="#e2704c" stroke-width="2.2"
-              d="M 60,60 L 132,60 L 162,180 L 186,195 L 221,225 L 254,270 L 288,285 L 345,300 L 382,309 L 454,315 L 569,321 L 684,324 L 780,324" />
-            <path class="line" stroke="#7fb8b5"
-              d="M 60,150 L 132,150 L 162,180 L 186,186 L 221,204 L 254,225 L 288,240 L 345,255 L 382,270 L 454,279 L 569,294 L 684,309 L 780,318" />
-            <path class="line" stroke="#877e69"
-              d="M 60,105 L 132,105 L 162,240 L 186,255 L 221,270 L 254,306 L 288,315 L 345,321 L 382,324 L 454,324 L 569,327 L 684,330 L 780,330" />
-            <path class="line" stroke="#d27564" stroke-dasharray="5 4"
-              d="M 60,90 L 132,90 L 162,150 L 186,159 L 221,195 L 254,231 L 288,246 L 345,270 L 382,291 L 454,300 L 569,315 L 684,324 L 780,330" />
+              d="M 60,55 C 170,85 330,195 780,230" />
 
-            <g>
-              <circle class="dot" cx="60"  cy="45"  r="3" fill="#a4c27a" />
-              <circle class="dot" cx="288" cy="150" r="3" fill="#a4c27a" />
-              <circle class="dot" cx="780" cy="276" r="3" fill="#a4c27a" />
-              <circle class="dot" cx="60"  cy="60"  r="3.5" fill="#e2704c" />
-              <circle class="dot" cx="162" cy="180" r="3.5" fill="#e2704c" />
-              <circle class="dot" cx="288" cy="285" r="3.5" fill="#e2704c" />
-            </g>
+            <!-- Tool_use blocks: the action breadcrumb. Useful signal
+                 for about 10 turns, then fades to a low floor. -->
+            <path class="line" stroke="#7fb8b5"
+              d="M 60,124 C 160,200 290,255 780,302" />
+
+            <!-- Read results: high on arrival, cliff by turn 5-10,
+                 near-zero by turn 50. -->
+            <path class="line" stroke="#e2704c" stroke-width="2.2"
+              d="M 60,68 C 140,180 230,290 780,314" />
+
+            <!-- Bash results: starts lower than Read (more ephemeral
+                 output), steeper cliff. -->
+            <path class="line" stroke="#e0b45c"
+              d="M 60,96 C 150,215 250,298 780,316" />
+
+            <!-- Grep / Glob: steepest cliff. Useful only in the moment
+                 of search; functionally dead within 5 turns. -->
+            <path class="line" stroke="#877e69"
+              d="M 60,138 C 95,235 170,308 780,320" />
+
+            <!-- Thinking (Opus 4.5+): reasoning persists for a handful
+                 of turns, then collapses. Dashed because older models
+                 strip it between turns entirely. -->
+            <path class="line" stroke="#d27564" stroke-dasharray="5 4"
+              d="M 60,118 C 150,220 280,300 780,314" />
           </svg>
 
           <div class="legend">
-            <div class="item"><span class="swatch" style="background:#a4c27a"></span><span>User text <span class="note">— slow decay</span></span></div>
-            <div class="item"><span class="swatch" style="background:#7fb8b5"></span><span>Tool use blocks <span class="note">— linear</span></span></div>
-            <div class="item"><span class="swatch" style="background:#e2704c"></span><span>Read results <span class="note">— steep exp</span></span></div>
-            <div class="item"><span class="swatch" style="background:#e0b45c"></span><span>Bash results <span class="note">— steep exp</span></span></div>
-            <div class="item"><span class="swatch" style="background:#877e69"></span><span>Grep / Glob <span class="note">— very steep</span></span></div>
-            <div class="item"><span class="swatch dashed" style="border-color:#d27564"></span><span>Thinking <span class="note">— model-dependent</span></span></div>
+            <div class="item"><span class="swatch" style="background:#a4c27a"></span><span>User text <span class="note">— anchors, doesn't fully decay</span></span></div>
+            <div class="item"><span class="swatch" style="background:#7fb8b5"></span><span>Tool use blocks <span class="note">— the action breadcrumb</span></span></div>
+            <div class="item"><span class="swatch" style="background:#e2704c"></span><span>Read results <span class="note">— fall off fast</span></span></div>
+            <div class="item"><span class="swatch" style="background:#e0b45c"></span><span>Bash results <span class="note">— fall off faster</span></span></div>
+            <div class="item"><span class="swatch" style="background:#877e69"></span><span>Grep / Glob <span class="note">— go stale immediately</span></span></div>
+            <div class="item"><span class="swatch dashed" style="border-color:#d27564"></span><span>Thinking <span class="note">— depends on the model</span></span></div>
           </div>
         </div>
 
-        <p class="caption">User text is nearly irreplaceable. Tool outputs decay steeply. Thinking is dashed because the behavior flipped on <code>Opus 4.5+</code> — newer models preserve thinking between turns, older ones strip it. Curve shown reflects Opus 4.5+.</p>
+        <p class="caption">Most of what's in a long session is already dead weight. Read results and command output collapse within the first five to ten turns. Grep and Glob are stale almost as soon as they arrive. Tool-use calls (the names and arguments of what the agent did) hang around longer because they're the skeleton of the work, but even they fade past turn twenty or so. The green user-text curve is the outlier: original instructions still anchor the session at turn 100, because they're the only record of what the job actually is. Thinking is dashed because Opus 4.5 changed how it's handled — older models strip thinking between turns, newer ones keep it, so the line only applies if you're on 4.5 or up. The shapes are informed by the JetBrains masking study, Chroma's context rot work, and Anthropic's own docs. The exact heights are our best-guess estimates, not benchmarked numbers.</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="wrap">
+        <div class="sec-tag">The evidence</div>
+        <h2>Masking holds up against summarizing. For less money.</h2>
+        <p class="intro">If the shapes above hold, the fix is straightforward. Keep the record of what the agent did and drop the outputs it got back. JetBrains tested exactly that in 2025 on <strong>500 SWE-bench Verified tasks</strong>. They compared two ways of shrinking a transcript: run the history through an LLM and use the summary, or replace old tool outputs with a short placeholder while keeping the tool name and arguments intact.</p>
+        <p class="intro">Masking tied or beat summarization on 4 of the 5 models tested. On Qwen3-Coder 480B it landed at <strong>54.8% solve rate</strong> against summarization's <strong>53.8%</strong>, and did it at <strong>52% of the cost</strong>. Summarization also made the agents run longer. Roughly 15% more turns, because the summaries blurred how badly earlier attempts had failed and the agents kept retrying bad paths.</p>
+
+        <blockquote>
+          "The simple approach of observation masking wasn't just cheaper; it often matched or even slightly beat LLM summarization in solving benchmark tasks."
+          <cite><a href="https://arxiv.org/abs/2508.21433">Lindenbauer &amp; Fraser · JetBrains Research · 2025</a></cite>
+        </blockquote>
+
+        <p class="intro">Masking means stripping the <code>tool_result</code> bodies while leaving every <code>tool_use</code> call (name and arguments) alone. That's what <code>safe</code> mode does to older turns. <code>slim</code> goes further and drops the old <code>tool_use</code> metadata too; the paper didn't test that, so treat it as unvalidated rather than broken.</p>
       </div>
     </section>
 
@@ -593,9 +650,9 @@
         <p class="caption"><span style="color:#a4c27a">Green</span> = keep, <span style="color:#e0b45c">amber</span> = consider trimming, <span style="color:#e2704c">coral</span> = safe to compress.</p>
 
         <ul class="prose" style="margin-top:1.5rem">
-          <li><strong>safe (last 5) keeps the last 5 user turns verbatim</strong> — tool outputs, thinking, everything. Full working memory for recent state.</li>
-          <li><strong>Older turns become a dialog trail</strong> — user text, assistant text, tool call names and arguments. The breadcrumb survives.</li>
-          <li><strong>Raw bodies are dropped in older turns</strong> — file contents, bash output, search results. Re-invoke the tool when needed.</li>
+          <li><strong>safe (last 5)</strong> keeps the last five user turns completely intact. Tool outputs, thinking, everything. Your recent working memory stays put.</li>
+          <li><strong>Older turns turn into a dialog trail.</strong> User text, assistant text, the name and arguments of every tool call. Enough to know what was done, not enough to re-read the results.</li>
+          <li><strong>The heavy bodies go.</strong> File contents, command output, search results. If the model needs them again it runs the tool again.</li>
         </ul>
       </div>
     </section>
@@ -604,14 +661,14 @@
       <div class="wrap">
         <div class="sec-tag">Context rot</div>
         <h2>More context isn't always better.</h2>
-        <p class="intro">Chroma Research's 2025 study across <strong>18 frontier models</strong> found that adding unrelated conversation history to a focused prompt dropped accuracy <strong>30-60%</strong> on LongMemEval. Claude models showed the most pronounced gap — not because they hallucinate, but because they abstain more under growing ambiguity.</p>
+        <p class="intro">Chroma ran a 2025 study across <strong>18 frontier models</strong>. They padded a focused prompt with unrelated conversation history and watched accuracy fall by <strong>30-60%</strong> on LongMemEval. Claude models showed the biggest drop, which sounds damning until you look closer. They weren't hallucinating more. They were refusing to commit. Once the context got noisy enough, they'd stop answering rather than guess.</p>
 
         <blockquote>
           "Dumb zone kicks in around ~40% context. Shoot to keep it under 40%, and if you get up to 60%, think about wrapping it up."
           <cite><a href="https://howborisusesclaudecode.com/">Boris Cherny · Claude Code · Anthropic</a></cite>
         </blockquote>
 
-        <p class="intro">Trimming isn't only a cost argument. A smaller session <em>performs better</em> than a bloated one because the signal-to-noise ratio affects attention allocation. The most expensive session is a full one that gives you the wrong answer.</p>
+        <p class="intro">Trimming is usually framed as a cost question, but that's not the whole story. A shorter session often answers better than a bloated one, because there's less noise competing for the model's attention. A full context window isn't free just because you paid for the tokens.</p>
       </div>
     </section>
 
@@ -619,7 +676,7 @@
       <div class="wrap">
         <div class="sec-tag">Mode selection</div>
         <h2>Which mode to pick, and when.</h2>
-        <p class="intro">Measured on a real 761k-token Opus 4.6 session (153 user turns):</p>
+        <p class="intro">Numbers below are from one real session: 761k tokens, 153 user turns, Opus 4.6.</p>
 
         <div class="table-wrap">
           <table>
@@ -640,9 +697,9 @@
           </table>
         </div>
 
-        <p class="caption">Quality risk is qualitative. <code>safe</code> sits closest to JetBrains' observation-masking pattern (tested at scale). <code>smart</code> applies per-component rules by turn depth: Read results drop after 15 turns, Bash truncates, Agent results survive longer (they're pre-summarized), <code>tool_use</code> metadata always stays as a skeleton. <code>slim</code> drops older <code>tool_use</code> metadata — not proven worse, but outside what the paper validated.</p>
+        <p class="caption">"Quality risk" is a judgment call, not a measurement. <code>safe</code> follows the JetBrains masking pattern, which is the one that's actually been tested at scale. <code>smart</code> applies per-component rules by turn depth: Read results drop past 15 turns, Bash truncates, Agent results stay longer (they're already summarized), and <code>tool_use</code> metadata always hangs around as a skeleton. <code>slim</code> drops older <code>tool_use</code> too. No one has shown that hurts performance, but no one has shown it doesn't either.</p>
 
-        <p class="intro" style="margin-top: 1.4rem"><strong style="color:var(--fg-soft);font-weight:500">Counter-case for slim.</strong> Chroma's Context Rot study finds that semantically-similar-but-irrelevant tokens actively mislead models (distractor interference). In a session where you've pivoted topic, retained stale tool_use calls with old file paths become textbook distractors. JetBrains tested on SWE-bench where older tool calls stay topic-relevant; in pivot-heavy sessions <code>slim</code>'s more aggressive trimming could plausibly help. There's no public benchmark that directly measures this — <code>safe</code> is the safer default because it matches a tested pattern, not because <code>slim</code> is proven-worse.</p>
+        <p class="intro" style="margin-top: 1.4rem"><strong style="color:var(--fg-soft);font-weight:500">A case for slim anyway.</strong> Chroma's Context Rot work shows that tokens which look topically relevant but aren't can actively mislead the model. If you've pivoted the conversation to a new file or a new task, stale <code>tool_use</code> calls pointing at the old paths are exactly that kind of distractor. JetBrains ran their tests on SWE-bench, where older tool calls tend to stay topic-relevant, so their data doesn't cover the pivot case. In a session where you've clearly changed direction, <code>slim</code>'s more aggressive cut might actually help. No public benchmark has tested it directly, so we can't say for sure. <code>safe</code> is the default because it matches a pattern someone actually ran the numbers on. That doesn't make <code>slim</code> wrong, just less studied.</p>
       </div>
     </section>
 
@@ -650,7 +707,7 @@
       <div class="wrap">
         <div class="sec-tag">smart rule table</div>
         <h2>Per-component, per-depth.</h2>
-        <p class="intro">The <code>smart</code> mode's rules derive from the relevance curves above. High-relevance components (user text, <code>tool_use</code> metadata) survive at all depths. Steep-decay components (Read, Bash, Grep results) truncate in the middle band and drop in the tail. Pre-summarized components (Agent results) survive longer because they're already condensed.</p>
+        <p class="intro">The <code>smart</code> rules follow the curves directly. Parts that hold their value at depth (user text, <code>tool_use</code> metadata) survive all the way through. Parts that fall off a cliff (Read, Bash, Grep) get truncated in the middle band and dropped in the tail. Agent results live longer because they already arrived as summaries.</p>
 
         <div class="table-wrap">
           <table>
@@ -672,7 +729,7 @@
           </table>
         </div>
 
-        <p class="caption">Values are char limits for <code>truncate N</code>. <code>tool_use</code> always kept so the skeleton of what-files-were-touched survives at any depth — the key differentiator vs <code>slim</code>. Recent turns (last 5) still get truncation on long content (thinking, big assistant text) because model state is rarely load-bearing on long prose blocks. Images always drop.</p>
+        <p class="caption">The numbers are character limits for <code>truncate N</code>. <code>tool_use</code> is always kept, so you can always see which files the agent touched. That's the main thing separating <code>smart</code> from <code>slim</code>. Even inside the recent five turns, long prose blocks like thinking or large assistant replies still get truncated; the model rarely depends on reading back its own essay. Images are dropped regardless of depth.</p>
       </div>
     </section>
 
@@ -680,8 +737,8 @@
       <div class="wrap">
         <div class="sec-tag">On thinking blocks</div>
         <h2>A default that quietly flipped.</h2>
-        <p class="intro">Through Claude 4.4, the API stripped prior thinking blocks between turns — dropping them was free. Starting <code>Opus 4.5</code>, the default flipped: thinking blocks are preserved. There's an open <a href="https://github.com/anthropics/claude-code/issues/20249" style="color:var(--accent-soft)">Claude Code issue</a> flagging the documentation inconsistency.</p>
-        <p class="intro">claudecompress accounts for this by <em>always preserving thinking within the last N user turns</em>, even when drop-thinking is enabled. Older thinking still gets dropped — it's rarely load-bearing past the recent window — but recent thinking is never touched.</p>
+        <p class="intro">Through Claude 4.4, the API quietly threw away prior thinking blocks between turns. Dropping them cost nothing because they weren't going to the model anyway. Opus 4.5 flipped the default. Now thinking blocks carry forward, and there's an open <a href="https://github.com/anthropics/claude-code/issues/20249" style="color:var(--accent-soft)">Claude Code issue</a> about the docs still being out of date.</p>
+        <p class="intro">claudecompress handles the flip this way: even when you ask it to drop thinking, the recent window stays intact. Within the last N user turns, nothing gets touched. Older thinking still goes, because once a few turns have passed, the model rarely needs to reread its earlier reasoning.</p>
       </div>
     </section>
 
@@ -690,10 +747,10 @@
         <div class="sec-tag">Caveats</div>
         <h2>What this theory doesn't prove.</h2>
         <ul class="prose">
-          <li>SWE-bench Verified measures <em>task completion</em>. claudecompress cares about <em>resume coherence</em> — whether the agent picks up where you left off after /resume. These optima may diverge. JetBrains' observation-masking result is a strong proxy, not a direct benchmark of our use case.</li>
-          <li>No controlled A/B test on claudecompress specifically. The measured savings are concrete; the quality story is research-aligned but not empirically validated end-to-end.</li>
-          <li><em>Lost in the Middle</em> (2023) tested GPT-3.5 and Claude 1.3. Opus 4.6 scores 78.3% on MRCR v2 at 1M tokens — much better, but the phenomenon persists, especially for Sonnet at extreme context lengths.</li>
-          <li>Scores mix published findings with logical inference. Treat them as informed starting points, not precise measurements. Re-derivability assumes tool access on resume.</li>
+          <li>SWE-bench measures whether an agent finished a task. What claudecompress cares about is whether the agent picks up coherently after you <code>/resume</code>. Those aren't the same metric, and the optima might not line up. JetBrains' result is a strong proxy, not a direct test of this use case.</li>
+          <li>There's no controlled A/B test on claudecompress itself. The token savings are measured and real; the quality story leans on adjacent research rather than an end-to-end experiment.</li>
+          <li>The original <em>Lost in the Middle</em> paper from 2023 tested GPT-3.5 and Claude 1.3. Modern Opus scores 78.3% on MRCR v2 at 1M tokens, which is a different world. The effect hasn't vanished, though, especially for Sonnet at very long context.</li>
+          <li>The relevance numbers on this page mix published findings with reasoned guesses. Treat them as a starting point for intuition, not a measurement. The whole approach also assumes you have tool access when you resume, so the agent can re-read anything it needs.</li>
         </ul>
       </div>
     </section>
@@ -725,7 +782,7 @@
     <div class="wrap">
       <span>MIT license</span>
       <span>
-        <a href="/">home</a>
+        <a href="../">home</a>
         <span class="dot-sep">·</span>
         <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
         <span class="dot-sep">·</span>

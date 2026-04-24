@@ -76,6 +76,23 @@
     }
     ::selection { background: var(--accent); color: var(--bg); }
 
+    /* Scrollbar: thin, warm-toned, coral thumb on press. Ships across
+       Firefox (scrollbar-color) and WebKit/Blink (::-webkit-scrollbar). */
+    html {
+      scrollbar-color: #3a352f var(--bg);
+      scrollbar-width: thin;
+    }
+    ::-webkit-scrollbar        { width: 12px; height: 12px; }
+    ::-webkit-scrollbar-track  { background: var(--bg); }
+    ::-webkit-scrollbar-thumb  {
+      background: #3a352f;
+      border: 3px solid var(--bg);   /* inset padding — thumb reads ~6px */
+      border-radius: 8px;
+    }
+    ::-webkit-scrollbar-thumb:hover  { background: var(--fg-fade); }
+    ::-webkit-scrollbar-thumb:active { background: var(--accent); }
+    ::-webkit-scrollbar-corner       { background: var(--bg); }
+
     /* Cool teal ambient from hero top: complements the warm coral ASCII */
     body::before {
       content: "";
@@ -102,6 +119,55 @@
       background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.8 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
       background-size: 200px 200px;
     }
+    /* Brand-mark ambient layer. Tiny ring + center dot (the claudecompress
+       aperture) tiled every 28px. Visible in the outer gutters, masked
+       transparent across the central reading column. Drifts slowly (40s)
+       so it reads as alive rather than stamped on. */
+    .bg-plus {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='28'><circle cx='14' cy='14' r='2.6' fill='none' stroke='%23e2dcd2' stroke-opacity='0.16' stroke-width='0.8'/><circle cx='14' cy='14' r='0.9' fill='%23e2dcd2' fill-opacity='0.22'/></svg>");
+      background-size: 28px 28px;
+      -webkit-mask-image: linear-gradient(
+        to right,
+        #000 0,
+        #000 max(0%, calc(50% - 960px)),
+        rgba(0, 0, 0, 0.65) max(0%, calc(50% - 820px)),
+        rgba(0, 0, 0, 0.25) max(0%, calc(50% - 700px)),
+        transparent max(0%, calc(50% - 580px)),
+        transparent min(100%, calc(50% + 580px)),
+        rgba(0, 0, 0, 0.25) min(100%, calc(50% + 700px)),
+        rgba(0, 0, 0, 0.65) min(100%, calc(50% + 820px)),
+        #000 min(100%, calc(50% + 960px)),
+        #000 100%
+      );
+              mask-image: linear-gradient(
+        to right,
+        #000 0,
+        #000 max(0%, calc(50% - 960px)),
+        rgba(0, 0, 0, 0.65) max(0%, calc(50% - 820px)),
+        rgba(0, 0, 0, 0.25) max(0%, calc(50% - 700px)),
+        transparent max(0%, calc(50% - 580px)),
+        transparent min(100%, calc(50% + 580px)),
+        rgba(0, 0, 0, 0.25) min(100%, calc(50% + 700px)),
+        rgba(0, 0, 0, 0.65) min(100%, calc(50% + 820px)),
+        #000 min(100%, calc(50% + 960px)),
+        #000 100%
+      );
+      animation: bg-plus-drift 40s linear infinite;
+    }
+    @keyframes bg-plus-drift {
+      from { background-position: 0 0; }
+      to   { background-position: 0 28px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .bg-plus { animation: none; }
+    }
+    /* Under ~1260px the mask collapses and the crosses disappear — mobile/
+       tablet have no gutters, so the layer would only invade the content. */
+
     body > * { position: relative; z-index: 1; }
 
     .wrap { max-width: 1120px; margin: 0 auto; padding: 0 clamp(1.15rem, 4vw, 3rem); }
@@ -1041,13 +1107,14 @@
   </style>
 </head>
 <body>
+  <div class="bg-plus" aria-hidden="true"></div>
   <header>
     <div class="wrap">
       <span class="brand"><span class="mark">◉</span><a href="/" class="current" aria-current="page">claudecompress</a></span>
       <span class="meta">
-        <span id="npm-version" data-version-sync>v0.16.0</span>
+        <span id="npm-version" data-version-sync>v0.16.5</span>
         <span class="dot-sep">·</span>
-        <a href="/theory/">theory</a>
+        <a href="theory/">theory</a>
         <span class="dot-sep">·</span>
         <a href="https://github.com/bihanikeshav/ClaudeCompress">github</a>
         <span class="dot-sep">·</span>
@@ -1122,7 +1189,7 @@
             <div class="preview-head">Status line</div>
             <div class="preview-body">
               <div class="state-line active">
-                <span class="dot">◉</span><span class="label">cache active</span><span class="sep">·</span>agent working<span class="sep">·</span><span class="faint">Opus 4.7</span>
+                <span class="dot">◉</span><span class="label">cache active</span><span class="sep">·</span><span id="hero-active-msg">agent working</span><span class="sep">·</span><span class="faint">Opus 4.7</span>
               </div>
               <div class="state-line warm">
                 <span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span><span id="hero-countdown">4:32</span> left<span class="sep">·</span><span class="faint">Opus 4.7</span>
@@ -1131,7 +1198,7 @@
                 <span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span><span id="hero-countdown-low">0:58</span> left<span class="sep">·</span><span class="faint">Opus 4.7</span>
               </div>
               <div class="state-line cold">
-                <span class="dot">◉</span><span class="label">cache cold</span><span class="sep">·</span>12m past<span class="sep">·</span><span class="chip">/compress</span> to save tokens
+                <span class="dot">◉</span><span class="label">cache cold</span><span class="sep">·</span><span id="hero-cold-past">12m past</span><span class="sep">·</span><span class="chip">/compress</span> to save tokens
               </div>
             </div>
           </aside>
@@ -1352,6 +1419,85 @@
     }
     installCountdown("hero-countdown");
     installCountdown("hero-countdown-low");
+
+// --- hero "agent working" message cycle -------------------------------
+    // The cache-active line quietly rotates through realistic Claude Code
+    // log messages. Reads as a living terminal, not a screenshot.
+    (function installActiveMsg() {
+      const el = document.getElementById("hero-active-msg");
+      if (!el || REDUCE_MOTION) return;
+      // Claude Code's spinner verbs (the gerunds shown next to the working
+      // spinner). Shuffled on each cycle so the landing doesn't feel scripted.
+      const msgs = [
+        "Cogitating…",
+        "Pondering…",
+        "Ruminating…",
+        "Noodling…",
+        "Musing…",
+        "Brewing…",
+        "Percolating…",
+        "Simmering…",
+        "Conjuring…",
+        "Crafting…",
+        "Synthesizing…",
+        "Tinkering…",
+        "Wrangling…",
+        "Sleuthing…",
+        "Divining…",
+        "Dithering…",
+        "Schmoozing…",
+        "Finagling…",
+        "Puttering…",
+        "Mulling…",
+      ];
+      // Fisher-Yates so repeated visits feel fresh
+      for (let k = msgs.length - 1; k > 0; k--) {
+        const j = Math.floor(Math.random() * (k + 1));
+        [msgs[k], msgs[j]] = [msgs[j], msgs[k]];
+      }
+      let i = 0;
+      el.style.transition = "opacity 240ms var(--ease, ease-out)";
+      setInterval(() => {
+        el.style.opacity = "0";
+        setTimeout(() => {
+          i = (i + 1) % msgs.length;
+          el.textContent = msgs[i];
+          el.style.opacity = "1";
+        }, 260);
+      }, 3200);
+    })();
+
+    // --- cold-line "past" counter ticks up --------------------------------
+    // Small life-signal: the cold line's elapsed time slowly grows so the
+    // four cache states together read as a real timeline.
+    (function installColdTick() {
+      const el = document.getElementById("hero-cold-past");
+      if (!el || REDUCE_MOTION) return;
+      let m = 12;
+      setInterval(() => {
+        m = m >= 59 ? 12 : m + 1;
+        el.textContent = m + "m past";
+      }, 8000);
+    })();
+
+    // --- console easter egg (for the dev who opens devtools) --------------
+    try {
+      const brand = "color:#7fb8b5;font-weight:600";
+      const soft  = "color:#b8b0a4";
+      const accent = "color:#e2704c";
+      console.info(
+        "%c◉ claudecompress  %cstatus line + trimmer for claude code\n" +
+        "%c  /compress%c   trim the transcript in place\n" +
+        "%c  /break%c      keepalive ping to reset the 5m cache ttl\n" +
+        "%c  ccw%c         wrapper that auto-resumes after /compress\n\n" +
+        "%cgithub.com/bihanikeshav/ClaudeCompress",
+        brand, soft,
+        accent, soft,
+        accent, soft,
+        accent, soft,
+        brand
+      );
+    } catch {}
 
     // --- savings cost count-down (on scroll into view) -------------------
     (function setupCostAnimator() {

@@ -176,7 +176,7 @@ async function estimateModeSavings(
   const out: Record<string, { after: number; saved: number }> = {};
   for (const { key, opts } of jobs) {
     try {
-      const outPath = await trimSession(sessionPath, opts);
+      const { path: outPath } = await trimSession(sessionPath, opts);
       const afterTokens = estimateSessionTokens(outPath, model);
       const afterCost = estimateColdResumeCost(afterTokens, model);
       out[key] = { after: afterCost, saved: Math.max(0, baseCost - afterCost) };
@@ -404,7 +404,7 @@ async function main() {
 
   const spin = p.spinner();
   spin.start("Trimming…");
-  const outPath = await trimSession(session, opts);
+  const { path: outPath } = await trimSession(session, opts);
   spin.stop("Trim complete.");
 
   const after = analyze(outPath);

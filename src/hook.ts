@@ -214,29 +214,33 @@ function detectCacheMode(sessionPath: string): "5m" | "1h" {
 }
 
 /**
- * Schedule claude (parent process) to exit so ccw can auto-resume.
+ * Shape of the signal file ccw reads when auto-resuming.
  *
- * Claude Code installs a SIGINT handler (the first Ctrl+C interrupts the
- * current turn; the second exits). We simulate that pattern with two
- * SIGINTs. On Windows, Node interprets SIGINT as a force-kill anyway.
+ * Historical format (v0.16 and earlier): a plain string containing the
+ * trimmed-session hash. The hook would do the trim inline and hand ccw
+ * the finished hash; ccw just respawned with `--resume <hash>`.
  *
- * Runs the kill via setTimeout so our hook has time to flush stderr and
- * return exit code 2. Hook process stays alive until the second timer
- * fires, then exits.
+ * Current format (v0.17+): JSON { v, session, opts }. The hook defers
+ * the actual trim work to ccw — it writes a "please trim this next time
+ * you respawn" request and exits. ccw reads the JSON, does the trim
+ * after claude exits, and respawns with the new hash. This removes all
+ * the parent-killing machinery the hook used to need on Windows, where
+ * the kill path was fragile enough that Claude Code regularly saw the
+ * hook's exit as a "non-blocking status code" instead of a clean block.
+ *
+ * ccw accepts both formats for backward compatibility.
  */
-function scheduleParentExit(exitCode: number): void {
-  const ppid = process.ppid;
-  if (!ppid) {
-    process.exit(exitCode);
-    return;
-  }
-  setTimeout(() => {
-    try { process.kill(ppid, "SIGINT"); } catch {}
-  }, 450).unref?.();
-  setTimeout(() => {
-    try { process.kill(ppid, "SIGINT"); } catch {}
-    process.exit(exitCode);
-  }, 650);
+interface PendingTrimSignal {
+  v: 1;
+  session: string;
+  opts: {
+    mode: TrimMode;
+    force?: boolean;
+    keepLastN?: number;
+    dropThinking?: boolean;
+    legacyMode?: string;
+    renamedFrom?: string;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -285,12 +289,66 @@ async function runCompressHook(
     }
   }
 
+  // Under ccw: defer the actual trim to ccw's respawn loop. Just write a
+  // pending-trim request and exit 2 cleanly. ccw will do the trim work
+  // after claude exits (ctrl+C) and respawn with the trimmed session.
+  // This keeps the hook lean and avoids the Windows-fragile job of
+  // killing Claude Code from inside its own child process.
+  const signalFile = process.env.CCW_SIGNAL_FILE;
+  if (signalFile) {
+    try {
+      const pending: PendingTrimSignal = {
+        v: 1,
+        session: sessionFile,
+        opts: {
+          mode: opts.mode,
+          force: opts.force,
+          keepLastN: opts.keepLastN,
+          dropThinking: opts.dropThinking,
+          legacyMode: opts.legacyMode,
+          renamedFrom: opts.renamedFrom,
+        },
+      };
+      mkdirSync(dirname(signalFile), { recursive: true });
+      writeFileSync(signalFile, JSON.stringify(pending));
+
+      const lines: string[] = [
+        "",
+        "┌─ claudecompress ────────────────────────────────────────┐",
+      ];
+      if (opts.legacyMode) {
+        lines.push(`│ note     '${opts.legacyMode}' was removed → using safe instead`);
+      }
+      if (opts.renamedFrom) {
+        lines.push(`│ note     '${opts.renamedFrom}' was renamed to '${opts.mode}' in v0.11`);
+      }
+      lines.push(
+        `│ mode     ${modeLabel(opts)}${opts.dropThinking ? " · drop thinking" : ""}`,
+        `│ session  ${basename(sessionFile, ".jsonl").slice(0, 8)}…`,
+        `│`,
+        `│ ccw will exit claude, compress this session, and`,
+        `│ auto-resume with a rehydrate prompt. Cache resets cold.`,
+        "└─────────────────────────────────────────────────────────┘",
+        "",
+      );
+      process.stderr.write(lines.join("\n"));
+      process.exit(2);
+    } catch (err) {
+      // Signal write failed — fall through and trim inline as best-effort.
+      process.stderr.write(
+        `[claudecompress] warning: couldn't write ccw signal (${String(err instanceof Error ? err.message : err)}); trimming inline\n`,
+      );
+    }
+  }
+
+  // Not under ccw (or signal write failed): do the trim here and tell
+  // the user how to resume manually.
   try {
     const model = findModel("claude-opus-4-7")!;
     const beforeTokens = estimateSessionTokens(sessionFile, model);
     const beforeCost = estimateColdResumeCost(beforeTokens, model);
 
-    const outPath = await trimSession(sessionFile, opts);
+    const { path: outPath } = await trimSession(sessionFile, opts);
     const afterTokens = estimateSessionTokens(outPath, model);
     const afterCost = estimateColdResumeCost(afterTokens, model);
     const newHash = basename(outPath, ".jsonl");
@@ -315,36 +373,12 @@ async function runCompressHook(
       `  trimmed session: ${newHash}`,
       "└─────────────────────────────────────────────────────────┘",
       "",
+      "  Exit this session (Ctrl+C twice) and run one of:",
+      `    claude --resume ${newHash}`,
+      `    claude --resume ${newHash} --dangerously-skip-permissions`,
+      "",
     );
-
-    const signalFile = process.env.CCW_SIGNAL_FILE;
-    let wroteSignal = false;
-    if (signalFile) {
-      try {
-        mkdirSync(dirname(signalFile), { recursive: true });
-        writeFileSync(signalFile, newHash);
-        wroteSignal = true;
-      } catch {}
-    }
-
-    if (wroteSignal) {
-      lines.push("  Running under ccw — auto-resuming to trimmed session…");
-    } else {
-      lines.push("  Exit this session (Ctrl+C twice) and run one of:");
-      lines.push(`    claude --resume ${newHash}`);
-      lines.push(`    claude --resume ${newHash} --dangerously-skip-permissions`);
-    }
-    lines.push("");
-
     process.stderr.write(lines.join("\n"));
-
-    if (wroteSignal) {
-      // ccw is watching for our exit + signal file. Auto-exit claude so
-      // the respawn loop picks up the trimmed session without the user
-      // needing to press Ctrl+C twice.
-      scheduleParentExit(2);
-      return;
-    }
     process.exit(2);
   } catch (err) {
     process.stderr.write(
@@ -448,14 +482,22 @@ function pickCacheReadRate(model: ModelInfo, _tokens: number): number {
 // ---------------------------------------------------------------------------
 
 export async function runHook(): Promise<void> {
+  const logPath = join(homedir(), ".claude", "claudecompress", "hook-debug.log");
   try {
     const raw = await readStdin();
     // Debug log: capture exactly what Claude Code sends so we can diagnose
     // session-resolution issues on Windows (bash-style vs native paths, etc.).
+    // Appends so history survives across turns; rotates at ~256KB.
     try {
-      const logPath = join(homedir(), ".claude", "claudecompress", "hook-debug.log");
       mkdirSync(dirname(logPath), { recursive: true });
-      writeFileSync(logPath, `${new Date().toISOString()}\n${raw}\n---\n`);
+      try {
+        if (statSync(logPath).size > 256 * 1024) writeFileSync(logPath, "");
+      } catch {}
+      writeFileSync(
+        logPath,
+        `${new Date().toISOString()}\n${raw}\n---\n`,
+        { flag: "a" },
+      );
     } catch {}
 
     let input: HookInput = {};
@@ -483,9 +525,17 @@ export async function runHook(): Promise<void> {
   } catch (err) {
     // Top-level safety net — surfaces any crash as stderr + exit 2 so the
     // user sees WHY the hook failed instead of a silent "non-blocking
-    // status code" from Claude Code.
+    // status code" from Claude Code. Also persist to the debug log so the
+    // error survives past Claude Code's UI, which may swallow stderr.
     const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ""}` : String(err);
     process.stderr.write(`[claudecompress] hook crashed:\n${msg}\n`);
+    try {
+      writeFileSync(
+        logPath,
+        `CRASH ${new Date().toISOString()}\n${msg}\n---\n`,
+        { flag: "a" },
+      );
+    } catch {}
     process.exit(2);
   }
 }

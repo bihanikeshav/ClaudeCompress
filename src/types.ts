@@ -18,6 +18,19 @@ export interface TrimOptions {
   dropThinking?: boolean;
 }
 
+export interface TrimResult {
+  /** Absolute path of the new (trimmed) JSONL. */
+  path: string;
+  /** Session id of the trimmed file (basename without extension). */
+  newSessionId: string;
+  originalBytes: number;
+  trimmedBytes: number;
+  originalLines: number;
+  trimmedLines: number;
+  /** Bytes saved as a percentage, rounded to 1 decimal (0-100). */
+  reductionPct: number;
+}
+
 export interface SizeReport {
   path: string;
   bytes: number;
