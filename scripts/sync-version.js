@@ -16,6 +16,7 @@ const version = pkg.version;
 
 const targets = [
   join(root, "docs", "index.html"),
+  join(root, "docs", "theory", "index.html"),
 ];
 
 // Matches an element with `data-version-sync` and replaces its text
