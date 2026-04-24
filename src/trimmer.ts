@@ -1,9 +1,10 @@
-import { createReadStream, createWriteStream, readFileSync, statSync } from "node:fs";
+import { createReadStream, createWriteStream, statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { TrimOptions, TrimResult } from "./types.ts";
 import { squashToolResult, squashToolUseInput } from "./squash.ts";
+import { isUserTextTurn } from "./records.ts";
 
 const REDACT_PLACEHOLDER = "";
 
@@ -261,31 +262,6 @@ function markFirstUser(rec: any): any {
   return copy;
 }
 
-/**
- * A "conversational exchange" is anchored by a user text message. Each time
- * the user says something, everything that follows (tool calls, tool
- * results, assistant replies, thinking) belongs to that exchange until the
- * next user text turn. Tool_result records (type: "user" with array
- * content) and client-side command records are NOT exchange starts.
- */
-function isUserTextTurn(rec: any): boolean {
-  if (rec?.type !== "user") return false;
-  const content = rec?.message?.content;
-  if (typeof content !== "string") return false;
-  const trimmed = content.trimStart();
-  if (
-    trimmed.startsWith("<local-command-") ||
-    trimmed.startsWith("<command-name>") ||
-    trimmed.startsWith("<command-message>") ||
-    trimmed.startsWith("<command-args>")
-  ) {
-    return false;
-  }
-  // Bare typed slash commands aren't conversational exchanges either.
-  if (/^\/[a-zA-Z][\w:-]*(\s|$)/.test(trimmed)) return false;
-  return true;
-}
-
 // Recency cutoff is derived from the single prescan in trimSession — no
 // separate function needed. Kept as an inline `cutoffFor(N)` closure.
 
@@ -307,21 +283,16 @@ export async function trimSession(
   const newSid = randomUUID();
   const outPath = join(dirname(inputPath), `${newSid}.jsonl`);
 
-  const rl = createInterface({
-    input: createReadStream(inputPath, { encoding: "utf8" }),
-    crlfDelay: Infinity,
-  });
   const outStream = createWriteStream(outPath, { encoding: "utf8" });
 
   let marked = false;
   let lastKeptUuid: string | null = null;
-  // Stats — we count input lines during prescan and output lines as we write.
   let originalLines = 0;
   let trimmedLines = 0;
   const toolUseNames = new Map<string, string>();
   const toolUseInputs = new Map<string, any>();
 
-  // Single prescan pass that collects everything we need:
+  // Single streaming pass that collects everything we need:
   //  - tool_use → (name, input) map for squash lookups
   //  - array of record indices where each user turn begins, so we can
   //    derive keep-last-N cutoffs for any N without re-reading the file.
@@ -329,16 +300,29 @@ export async function trimSession(
   //    (earlier Reads are stale — dedup by replacing their tool_result)
   //  - latestTodoWriteId: tool_use_id of the last TodoWrite (older Todo
   //    states are overwritten; keep only the most recent)
+  //  - cached line strings so the transform pass doesn't re-read from disk
+  //
+  // Before v0.16.7 this was two full-file reads: an in-memory split() for
+  // the prescan and a streaming read for the transform. On 40MB sessions
+  // that doubled peak memory (string + split-array) and doubled disk IO.
+  // The single-pass version halves both — we still parse each line twice
+  // (once for prescan signal extraction, once for transform) but at least
+  // the raw bytes only traverse the filesystem once.
+  const lines: string[] = [];
   const userTurnAtRecord: number[] = [];
   const latestReadIdByPath = new Map<string, string>();
   let latestTodoWriteId: string | null = null;
   {
-    const data = readFileSync(inputPath, "utf8");
+    const rl = createInterface({
+      input: createReadStream(inputPath, { encoding: "utf8" }),
+      crlfDelay: Infinity,
+    });
     let recIdx = -1;
-    for (const line of data.split("\n")) {
+    for await (const line of rl) {
       if (!line) continue;
       recIdx += 1;
       originalLines += 1;
+      lines.push(line);
       try {
         const rec = JSON.parse(line);
         const content = rec?.message?.content;
@@ -359,7 +343,10 @@ export async function trimSession(
         if (isUserTextTurn(rec)) {
           userTurnAtRecord.push(recIdx);
         }
-      } catch {}
+      } catch {
+        // Malformed line — still counted (keeps indexing aligned with the
+        // transform pass) and still passed through to the output below.
+      }
     }
   }
 
@@ -395,16 +382,26 @@ export async function trimSession(
 
   let recordIdx = -1;
 
-  for await (const line of rl) {
-    if (!line) continue;
+  // Transform pass — iterates the in-memory line cache built during the
+  // prescan above. Parses each line fresh (the prescan only needed a few
+  // fields and we don't want to keep every parsed record in memory for
+  // large sessions).
+  for (const line of lines) {
+    // Increment BEFORE the parse. If we incremented only after a
+    // successful parse, a single malformed line would shift all
+    // subsequent record indices by one relative to prescan — meaning
+    // the cutoff boundaries (band0/band1/keepLastN/thinkingCutoff) would
+    // land on the wrong records, silently trimming recent turns that the
+    // user expected to keep verbatim.
+    recordIdx += 1;
     let rec: any;
     try {
       rec = JSON.parse(line);
     } catch {
       outStream.write(line + "\n");
+      trimmedLines += 1;
       continue;
     }
-    recordIdx += 1;
 
     // file-history-snapshot records are harness metadata for /rewind, not
     // model-reasoning context. Drop them universally — every mode benefits
@@ -474,11 +471,19 @@ export async function trimSession(
         if (blk?.type === "tool_use" && compressInputs) {
           return squashToolUseInput(blk, blk.name);
         }
-        // Truncate older assistant text. On safe mode, older turns are
-        // kept verbatim via observation masking — but the filler prose
-        // ("Great, I'll now...", "Let me check...") is rarely load-bearing.
-        // Cap at 400 chars for records outside the recent window.
-        if (blk?.type === "text" && compressInputs && isAssistantRec) {
+        // Truncate older assistant text. On safe/slim, observation masking
+        // only touches tool_results — assistant prose otherwise passes
+        // through intact, but filler lines ("Great, I'll now...", "Let me
+        // check...") are rarely load-bearing. Cap at 400 chars outside
+        // the recent window. Skipped for smart mode because its per-band
+        // rules already govern assistant_text length (T(800)/T(300)/DROP),
+        // and for lossless (which is, by definition, not supposed to cut).
+        if (
+          blk?.type === "text" &&
+          compressInputs &&
+          isAssistantRec &&
+          (opts.mode === "safe" || opts.mode === "slim")
+        ) {
           const t = blk.text;
           if (typeof t === "string" && t.length > 400) {
             return { ...blk, text: t.slice(0, 400) };

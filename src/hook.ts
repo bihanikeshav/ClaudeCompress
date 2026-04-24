@@ -16,6 +16,7 @@ import { trimSession } from "./trimmer.ts";
 import { estimateSessionTokens } from "./analyzer.ts";
 import { estimateColdResumeCost, findModel, formatUSD, type ModelInfo } from "./pricing.ts";
 import { logError, logEvent } from "./errorLog.ts";
+import { readStdin } from "./stdin.ts";
 import type { TrimMode, TrimOptions } from "./types.ts";
 
 interface HookInput {
@@ -26,31 +27,31 @@ interface HookInput {
   prompt?: string;
 }
 
-function readStdin(): Promise<string> {
-  return new Promise((resolve) => {
-    let data = "";
-    let settled = false;
-    const done = () => {
-      if (settled) return;
-      settled = true;
-      resolve(data);
-    };
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk) => (data += chunk));
-    process.stdin.on("end", done);
-    process.stdin.on("error", done);
-    setTimeout(done, 750).unref?.();
-  });
-}
 
 const VALID_MODES: TrimMode[] = ["lossless", "safe", "smart", "slim"];
-// v0.16 removal: `archive` was dominated by `slim` on every axis. Map it
-// to slim so users with old /compress habits don't silently fail.
-const RENAMED: Record<string, TrimMode> = { archive: "slim" };
 
-function parseCompressArgs(
+// Legacy mode aliases that still resolve to a current mode. When a user
+// passes one of these, we preserve their intent and surface a note in
+// the banner so they know to migrate. Split by rename vs removed so the
+// banner can use accurate wording.
+//
+// v0.11 rename wave: recency→safe, distill→smart, focus→slim
+// v0.16 rename:     archive→slim (archive's behavior was dominated by
+//                   slim on every axis we measured)
+const RENAMED_MODES: Record<string, TrimMode> = {
+  recency: "safe",
+  distill: "smart",
+  focus: "slim",
+  archive: "slim",
+};
+// v0.10 fully-removed mode names — no direct equivalent, fall back to safe.
+const REMOVED_MODES = new Set(["redact", "truncate", "sift"]);
+
+// Exported so tests can verify the legacy-mode mapping without having
+// to drive the full hook pipeline.
+export function parseCompressArgs(
   prompt: string,
-): (TrimOptions & { force?: boolean }) | null {
+): (TrimOptions & { force?: boolean; legacyMode?: string; renamedFrom?: string }) | null {
   const m = prompt.trim().match(/^\/compress\b\s*(.*)$/);
   if (!m) return null;
   const allTokens = (m[1] ?? "").trim().split(/\s+/).filter(Boolean);
@@ -58,12 +59,29 @@ function parseCompressArgs(
   const tokens = allTokens.filter((t) => t !== "force" && t !== "--force");
   const modeTok = tokens[0] ?? "safe";
 
-  const mode: TrimMode = (VALID_MODES as string[]).includes(modeTok)
-    ? (modeTok as TrimMode)
-    : (RENAMED[modeTok] ?? "safe");
+  let mode: TrimMode;
+  let renamedFrom: string | undefined;
+  let legacyMode: string | undefined;
 
-  const opts: TrimOptions & { force?: boolean } = { mode };
+  if ((VALID_MODES as string[]).includes(modeTok)) {
+    mode = modeTok as TrimMode;
+  } else if (RENAMED_MODES[modeTok] !== undefined) {
+    mode = RENAMED_MODES[modeTok]!;
+    renamedFrom = modeTok;
+  } else if (REMOVED_MODES.has(modeTok)) {
+    mode = "safe";
+    legacyMode = modeTok;
+  } else {
+    // Unknown token — default to safe but flag so the banner can show
+    // the user their input wasn't recognized.
+    mode = "safe";
+    if (modeTok !== "safe") legacyMode = modeTok;
+  }
+
+  const opts: TrimOptions & { force?: boolean; legacyMode?: string; renamedFrom?: string } = { mode };
   if (force) opts.force = true;
+  if (renamedFrom) opts.renamedFrom = renamedFrom;
+  if (legacyMode) opts.legacyMode = legacyMode;
   if (mode === "safe" || mode === "slim")
     opts.keepLastN = Number(tokens[1]) || 5;
   opts.dropThinking = true;
@@ -174,29 +192,25 @@ interface CacheState {
 }
 
 /**
- * Tail-read the session JSONL and find the latest assistant record with
- * cache info. Returns mode + anchor timestamp so callers can decide if
- * the cache is likely still warm at wall-clock now.
+ * Scan the session JSONL backwards for the latest assistant record with
+ * cache-usage info. Returns mode + anchor timestamp so callers can
+ * decide if the cache is likely still warm at wall-clock now.
+ *
+ * The scan starts from the tail and expands the window progressively if
+ * it comes up empty. An earlier version of this function stopped at a
+ * fixed 500KB tail, which silently returned `remainingSec: null` (→ the
+ * warm-cache guard treated it as cold) for any session where the last
+ * cache-bearing assistant was further back. On sessions with many
+ * consecutive tool_result records that's surprisingly easy to hit.
+ *
+ * Exported so tests can verify detection on crafted JSONL fixtures.
  */
-function detectCacheState(sessionPath: string): CacheState {
+export function detectCacheState(sessionPath: string): CacheState {
   const fallback: CacheState = { mode: "5m", anchorMs: null, remainingSec: null };
-  try {
-    const st = statSync(sessionPath);
-    const size = st.size;
-    let data: string;
-    if (size > 2_000_000) {
-      const fd = openSync(sessionPath, "r");
-      const len = 500_000;
-      const buf = Buffer.allocUnsafe(len);
-      const pos = Math.max(0, size - len);
-      readSync(fd, buf, 0, len, pos);
-      closeSync(fd);
-      data = buf.toString("utf8");
-    } else {
-      data = readFileSync(sessionPath, "utf8");
-    }
-    const lines = data.split("\n").reverse();
-    for (const line of lines) {
+  const scanLines = (lines: string[]): CacheState | null => {
+    // Walk newest-first so the first hit is the most recent cache record.
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const line = lines[i]!;
       if (!line) continue;
       let rec: any;
       try { rec = JSON.parse(line); } catch { continue; }
@@ -213,6 +227,40 @@ function detectCacheState(sessionPath: string): CacheState {
       const ttlSec = mode === "1h" ? 3600 : 300;
       const remainingSec = anchorMs === null ? null : ttlSec - (Date.now() - anchorMs) / 1000;
       return { mode, anchorMs, remainingSec };
+    }
+    return null;
+  };
+  try {
+    const st = statSync(sessionPath);
+    const size = st.size;
+    // Small files: one read, done.
+    if (size <= 4_000_000) {
+      const lines = readFileSync(sessionPath, "utf8").split("\n");
+      return scanLines(lines) ?? fallback;
+    }
+    // Large files: progressively expand the tail window. Doubling strategy
+    // bounds total bytes read at ~2× the position where we find the hit,
+    // and worst case reads the whole file once.
+    const fd = openSync(sessionPath, "r");
+    try {
+      let len = 500_000;
+      while (len < size * 2) {
+        const readLen = Math.min(len, size);
+        const pos = Math.max(0, size - readLen);
+        const buf = Buffer.allocUnsafe(readLen);
+        readSync(fd, buf, 0, readLen, pos);
+        const data = buf.toString("utf8");
+        // Unless we started at position 0, the first line is likely a
+        // fragment from a larger record — drop it to avoid parse noise.
+        const lines = data.split("\n");
+        if (pos > 0) lines.shift();
+        const hit = scanLines(lines);
+        if (hit) return hit;
+        if (pos === 0) break; // already read the whole file
+        len *= 4; // aggressive growth so we bail to full-file fast
+      }
+    } finally {
+      closeSync(fd);
     }
   } catch {}
   return fallback;
@@ -333,10 +381,10 @@ async function runCompressHook(
         "┌─ claudecompress ────────────────────────────────────────┐",
       ];
       if (opts.legacyMode) {
-        lines.push(`│ note     '${opts.legacyMode}' was removed → using safe instead`);
+        lines.push(`│ note     '${opts.legacyMode}' is not a mode I know → using safe`);
       }
       if (opts.renamedFrom) {
-        lines.push(`│ note     '${opts.renamedFrom}' was renamed to '${opts.mode}' in v0.11`);
+        lines.push(`│ note     '${opts.renamedFrom}' was renamed to '${opts.mode}'`);
       }
       lines.push(
         `│ mode     ${modeLabel(opts)}${opts.dropThinking ? " · drop thinking" : ""}`,
@@ -378,10 +426,10 @@ async function runCompressHook(
       "┌─ claudecompress ────────────────────────────────────────┐",
     ];
     if (opts.legacyMode) {
-      lines.push(`  note:   '${opts.legacyMode}' was removed → using safe instead`);
+      lines.push(`  note:   '${opts.legacyMode}' is not a mode I know → using safe`);
     }
     if (opts.renamedFrom) {
-      lines.push(`  note:   '${opts.renamedFrom}' was renamed to '${opts.mode}' in v0.11`);
+      lines.push(`  note:   '${opts.renamedFrom}' was renamed to '${opts.mode}'`);
     }
     lines.push(
       `  mode:   ${modeLabel(opts)}${opts.dropThinking ? " · drop thinking (outside last-N window)" : ""}`,
@@ -452,7 +500,7 @@ function runBreakHook(input: HookInput, args: { minutes: number }): void {
       try {
         const model = findModel("claude-opus-4-7")!;
         const tokens = estimateSessionTokens(sessionFile, model);
-        const readRate = pickCacheReadRate(model, tokens);
+        const readRate = pickCacheReadRate(model);
         const perPing = (tokens / 1_000_000) * readRate;
         const total = perPing * pingsNeeded;
         costNote = `  cost/ping:  ${formatUSD(perPing)}  (cache read · ${fmtTokens(tokens)} tokens)`;
@@ -489,7 +537,7 @@ function runBreakHook(input: HookInput, args: { minutes: number }): void {
   process.exit(2); // block the /break prompt itself; it's informational only
 }
 
-function pickCacheReadRate(model: ModelInfo, _tokens: number): number {
+function pickCacheReadRate(model: ModelInfo): number {
   // Opus 4.5+ bills the full 1M context at flat per-token rates, so
   // cache-read cost scales linearly with session size.
   return model.cachedInputPerMillion;
@@ -502,7 +550,7 @@ function pickCacheReadRate(model: ModelInfo, _tokens: number): number {
 export async function runHook(): Promise<void> {
   const logPath = join(homedir(), ".claude", "claudecompress", "hook-debug.log");
   try {
-    const raw = await readStdin();
+    const raw = await readStdin(750);
     // Debug log: capture exactly what Claude Code sends so we can diagnose
     // session-resolution issues on Windows (bash-style vs native paths, etc.).
     // Appends so history survives across turns; rotates at ~256KB.

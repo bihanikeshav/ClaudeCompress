@@ -21,7 +21,33 @@ const BREAK_COMMAND_PATH = join(CLAUDE_HOME, "commands", "break.md");
 // decides which flow to run based on the prompt content.
 const HOOK_MATCHER = "^/(compress|break)\\b";
 const HOOK_TAG = "claudecompress hook";
-const STATUSLINE_TAG = "claudecompress statusline";
+
+/**
+ * Decide whether a `statusLine.command` string was installed by
+ * claudecompress. The command can take two shapes depending on the user's
+ * environment:
+ *
+ *   1. `claudecompress statusline`                            — global CLI
+ *   2. `bun "/path/.../claudecompress/dist/index.js" statusline`  — bun mode
+ *
+ * Earlier versions only matched the literal substring
+ * `"claudecompress statusline"`, which silently missed case (2) because
+ * the bun-mode command has a path + quotes between the two words. That
+ * broke both re-install detection and uninstall cleanup for the preferred
+ * (bun) code path. The check here handles both shapes.
+ *
+ * Exported so tests can verify the detection against real command strings.
+ */
+export function isOurStatusline(cmd: string | undefined | null): boolean {
+  if (typeof cmd !== "string" || !cmd.trim()) return false;
+  // Must end on the word "statusline" (trim any trailing shell redirects
+  // or quotes the user might have grafted on).
+  if (!/\bstatusline\s*$/.test(cmd.trim())) return false;
+  // Either: bun-mode path contains "/claudecompress/" (or "\claudecompress\"
+  // on Windows), OR the plain-CLI form contains "claudecompress " before
+  // "statusline". Both branches imply claudecompress is in the command.
+  return /[\\/]claudecompress[\\/]/.test(cmd) || /\bclaudecompress\s+statusline\b/.test(cmd);
+}
 
 function commandExists(cmd: string): boolean {
   try {
@@ -235,9 +261,7 @@ async function planStatusline(settings: any): Promise<StatusDecision | null> {
     : pc.dim(`(refresh every ${REFRESH_INTERVAL}s — install bun for faster ticks)`);
 
   const existing = settings.statusLine;
-  const existingIsOurs =
-    typeof existing?.command === "string" &&
-    existing.command.includes(STATUSLINE_TAG);
+  const existingIsOurs = isOurStatusline(existing?.command);
 
   if (existingIsOurs) {
     const refresh = await p.confirm({
@@ -444,7 +468,7 @@ export async function uninstall(): Promise<void> {
   }
   const removed = removeHook(settings);
   let removedStatusline = false;
-  if (settings.statusLine?.command?.includes(STATUSLINE_TAG)) {
+  if (isOurStatusline(settings.statusLine?.command)) {
     delete settings.statusLine;
     removedStatusline = true;
   }

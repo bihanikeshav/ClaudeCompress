@@ -13,6 +13,8 @@ import {
   inferStopReasonFromContent,
   type StatuslineCache,
 } from "./statusline-cache.ts";
+import { readStdin } from "./stdin.ts";
+import { isClientSideCommandRecord } from "./records.ts";
 
 interface StatuslineInput {
   session_id?: string;
@@ -30,57 +32,6 @@ interface Usage {
     ephemeral_5m_input_tokens?: number;
     ephemeral_1h_input_tokens?: number;
   };
-}
-
-function readStdin(): Promise<string> {
-  return new Promise((resolve) => {
-    let data = "";
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      resolve(data);
-    };
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (c) => (data += c));
-    process.stdin.on("end", finish);
-    process.stdin.on("error", finish);
-    setTimeout(finish, 250).unref?.();
-  });
-}
-
-/**
- * Claude Code writes several user records when the user runs a local slash
- * command like /context, /clear, /compact. None of them represent a message
- * awaiting an assistant response — they're client-side UI artifacts:
- *   1. " /context"                      (literal typed command)
- *   2. "<local-command-caveat>…"        (the caveat header)
- *   3. "<command-name>…</command-name>" (the command wrapper)
- *   4. "<local-command-stdout>…"        (captured stdout, if any)
- *
- * Treating these as "user newer than assistant" locks our statusLine into
- * "agent working" forever. Filter them out when picking the latest real
- * user turn.
- *
- * Tool_result user records (array content, not string) pass through — those
- * DO correspond to real mid-turn activity.
- */
-function isClientSideCommandRecord(rec: any): boolean {
-  const content = rec?.message?.content;
-  if (typeof content !== "string") return false;
-  const trimmed = content.trimStart();
-  if (
-    trimmed.startsWith("<local-command-") ||
-    trimmed.startsWith("<command-name>") ||
-    trimmed.startsWith("<command-message>") ||
-    trimmed.startsWith("<command-args>")
-  ) {
-    return true;
-  }
-  // Bare typed slash command like "/context" or "/compact foo". Slash
-  // commands never expect an assistant reply of their own; Claude Code
-  // handles them either client-side or by injecting new content.
-  return /^\/[a-zA-Z][\w:-]*(\s|$)/.test(trimmed);
 }
 
 /**
@@ -241,7 +192,7 @@ function color(c: string, s: string): string {
 }
 
 export async function runStatusline(): Promise<void> {
-  const raw = await readStdin();
+  const raw = await readStdin(250);
   let input: StatuslineInput = {};
   try {
     input = JSON.parse(raw);

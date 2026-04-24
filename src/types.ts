@@ -13,7 +13,6 @@ export type LegacyTrimMode =
 
 export interface TrimOptions {
   mode: TrimMode;
-  keepChars?: number;
   keepLastN?: number;
   dropThinking?: boolean;
 }

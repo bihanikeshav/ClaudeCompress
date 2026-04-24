@@ -74,6 +74,5 @@ export function estimateColdResumeCost(tokens: number, model: ModelInfo): number
 
 export function formatUSD(n: number): string {
   if (n < 0.01) return `<$0.01`;
-  if (n < 1) return `$${n.toFixed(2)}`;
   return `$${n.toFixed(2)}`;
 }

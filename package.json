@@ -1,6 +1,6 @@
 {
   "name": "claudecompress",
-  "version": "0.16.6",
+  "version": "0.16.7",
   "description": "Analyze and shrink Claude Code session transcripts so /resume loads faster and cheaper.",
   "type": "module",
   "bin": {
@@ -10,8 +10,9 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "sync-version": "node scripts/sync-version.js",
+    "test": "bun test tests/",
     "build": "bun build src/index.ts src/ccw.ts --target=node --outdir=dist && node scripts/sync-version.js",
-    "prepublishOnly": "bun build src/index.ts src/ccw.ts --target=node --outdir=dist && node scripts/sync-version.js"
+    "prepublishOnly": "bun test tests/ && bun build src/index.ts src/ccw.ts --target=node --outdir=dist && node scripts/sync-version.js"
   },
   "keywords": [
     "claude-code",

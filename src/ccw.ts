@@ -74,7 +74,12 @@ function resolveClaudeCmd(): string {
 /**
  * Kill the entire process tree rooted at `pid`. On Windows we use
  * taskkill /T because child.kill() only terminates the direct child
- * and leaves claude's sub-processes (hooks, shells) as orphans.
+ * and leaves claude's sub-processes (hooks, shells, MCP servers) as
+ * orphans. On Unix we spawn claude in a new process group via
+ * `detached: true` so we can signal the whole group with a negative
+ * pid — that catches claude plus every shell/subprocess it forked.
+ * Falls back to a direct kill if the group signal fails (e.g. the
+ * group leader already exited).
  */
 function killTree(pid: number): void {
   if (process.platform === "win32") {
@@ -83,10 +88,22 @@ function killTree(pid: number): void {
     } catch (err) {
       logError("ccw.killTree", err, { pid });
     }
-  } else {
-    try { process.kill(pid, "SIGTERM"); } catch (err) {
-      logError("ccw.killTree", err, { pid });
-    }
+    return;
+  }
+  try {
+    // Negative pid = signal the entire process group. Works only if the
+    // child was spawned with detached:true so it became a group leader.
+    process.kill(-pid, "SIGTERM");
+    return;
+  } catch (err) {
+    // Group kill can fail if the child exited before we got here or if
+    // detached:true wasn't honored. Fall through to direct pid kill.
+    logError("ccw.killTree.group", err, { pid });
+  }
+  try {
+    process.kill(pid, "SIGTERM");
+  } catch (err) {
+    logError("ccw.killTree.fallback", err, { pid });
   }
 }
 
@@ -102,7 +119,36 @@ function runClaude(args: string[]): Promise<number> {
         CCW_ACTIVE: "1",
       },
       shell: process.platform === "win32" || cmd !== "claude",
+      // On Unix, put the child in its own process group so killTree can
+      // signal the whole tree (claude + hook shells + MCP subprocesses)
+      // via process.kill(-pid). Windows has taskkill /T so detach isn't
+      // needed — and detaching there changes console semantics in ways
+      // that break stdio inheritance.
+      detached: process.platform !== "win32",
     });
+
+    // When ccw itself receives a terminate signal (user hits Ctrl+C on
+    // the wrapper, or the OS sends SIGTERM), forward it to the whole
+    // child group instead of dying silently and leaving claude running.
+    // With detached:true the child group no longer shares our signal
+    // handling by default, so we do it explicitly.
+    const forwardSignal = (sig: NodeJS.Signals) => {
+      if (!child.pid) return;
+      try {
+        if (process.platform === "win32") {
+          // Windows doesn't have process groups; direct kill is best we can do.
+          child.kill(sig);
+        } else {
+          process.kill(-child.pid, sig);
+        }
+      } catch {
+        // child already gone
+      }
+    };
+    const onSigint = () => forwardSignal("SIGINT");
+    const onSigterm = () => forwardSignal("SIGTERM");
+    process.on("SIGINT", onSigint);
+    process.on("SIGTERM", onSigterm);
 
     // Watch the signal file in parallel with the child process.
     // When the /compress hook writes a signal, we kill claude from
@@ -132,11 +178,15 @@ function runClaude(args: string[]): Promise<number> {
     child.on("exit", (code) => {
       armed = false;
       clearInterval(watcher);
+      process.off("SIGINT", onSigint);
+      process.off("SIGTERM", onSigterm);
       resolve(code ?? 0);
     });
     child.on("error", (err) => {
       armed = false;
       clearInterval(watcher);
+      process.off("SIGINT", onSigint);
+      process.off("SIGTERM", onSigterm);
       logError("ccw.runClaude", err, { cmd, args });
       process.stderr.write(
         `[ccw] failed to spawn ${cmd}: ${err.message}\n` +
