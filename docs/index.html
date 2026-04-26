@@ -647,6 +647,11 @@
       font-size: 0.94em;
       white-space: nowrap;
     }
+    .state-line .cold-action { white-space: nowrap; }
+    .state-line .cold-action-suffix { color: var(--fg-soft); }
+    @media (max-width: 640px) {
+      .state-line .cold-action-suffix { display: none; }
+    }
     #hero-countdown, #hero-countdown-low { margin-right: 0.28em; }
     .state-line.warm   .dot, .state-line.warm .label   { color: var(--state-ok); }
     .state-line.low    .dot, .state-line.low .label    { color: var(--state-warn); }
@@ -1198,7 +1203,7 @@
                 <span class="dot">◉</span><span class="label">cache warm</span><span class="sep">·</span>5m<span class="sep">·</span><span id="hero-countdown-low">0:58</span> left<span class="sep">·</span><span class="faint">Opus 4.7</span>
               </div>
               <div class="state-line cold">
-                <span class="dot">◉</span><span class="label">cache cold</span><span class="sep">·</span><span id="hero-cold-past">12m past</span><span class="sep">·</span><span class="chip">/compress</span> to save tokens
+                <span class="dot">◉</span><span class="label">cache cold</span><span class="sep">·</span><span id="hero-cold-past">12m past</span><span class="sep">·</span><span class="cold-action"><span class="chip">/compress</span><span class="cold-action-suffix">to save tokens</span></span>
               </div>
             </div>
           </aside>
