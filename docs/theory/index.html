@@ -668,7 +668,7 @@
           <cite><a href="https://howborisusesclaudecode.com/">Boris Cherny · Claude Code · Anthropic</a></cite>
         </blockquote>
 
-        <p class="intro">Trimming is usually framed as a cost question, but that's not the whole story. A shorter session often answers better than a bloated one, because there's less noise competing for the model's attention. A full context window isn't free just because you paid for the tokens.</p>
+        <p class="intro">Trimming is usually framed as a cost question, but that's not the whole story. A shorter session often answers better than a bloated one, because there's less noise competing for the model's attention. A full context window isn't free just because you paid for the tokens. (And on the cost side, <a href="https://she-llac.com/claude-limits" style="color:var(--accent-soft)">independent analysis</a> suggests cache reads don't count against the rate-limit block on subscription plans — only cold reads do, which sharpens the case for keeping <code>/resume</code> small.)</p>
       </div>
     </section>
 
