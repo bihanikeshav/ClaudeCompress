@@ -191,31 +191,20 @@ function color(c: string, s: string): string {
   return `${c}${s}${R}`;
 }
 
-export async function runStatusline(): Promise<void> {
-  const raw = await readStdin(250);
-  let input: StatuslineInput = {};
-  try {
-    input = JSON.parse(raw);
-  } catch {
-    // keep going; render what we can
-  }
-  const path = input.transcript_path;
-  const sessionId = input.session_id ?? "";
-  if (!path) {
-    process.stdout.write("");
-    return;
-  }
-
+export function renderCacheLine(
+  sessionPath: string,
+  sessionId: string,
+  modelLabel?: string,
+): string {
   // --- cache lookup -------------------------------------------------------
   let mtime_ms: number;
   let size: number;
   try {
-    const st = statSync(path);
+    const st = statSync(sessionPath);
     mtime_ms = st.mtimeMs;
     size = st.size;
   } catch {
-    process.stdout.write("◉ new session · cache not yet seeded");
-    return;
+    return "◉ new session · cache not yet seeded";
   }
 
   const cached = readCache(sessionId);
@@ -227,13 +216,11 @@ export async function runStatusline(): Promise<void> {
   ) {
     latest = cached;
   } else {
-    latest = parseLatest(path, size);
+    latest = parseLatest(sessionPath, size);
     writeCache(sessionId, { jsonl_mtime_ms: mtime_ms, jsonl_size: size, ...latest });
   }
 
   // --- render -------------------------------------------------------------
-  const modelLabel =
-    input.model?.display_name ?? input.model?.id?.replace(/^claude-/, "") ?? "";
   const modelTag = modelLabel ? dim(` · ${modelLabel}`) : "";
 
   const assistantTs = latest.last_assistant_ts
@@ -285,19 +272,13 @@ export async function runStatusline(): Promise<void> {
   }
 
   if (working) {
-    process.stdout.write(
-      `${color(CYAN, "◉")} ${color(CYAN, "cache active")} ${dim("·")} agent working${modelTag}`,
-    );
-    return;
+    return `${color(CYAN, "◉")} ${color(CYAN, "cache active")} ${dim("·")} agent working${modelTag}`;
   }
 
   if (!assistantTs) {
     // No cache-bearing assistant record yet. Interrupt in a fresh session
     // lands here too (no cache to expire anyway).
-    process.stdout.write(
-      `${dim("◉ new session · cache not yet seeded")}${modelTag}`,
-    );
-    return;
+    return `${dim("◉ new session · cache not yet seeded")}${modelTag}`;
   }
 
   // Countdown anchor: whichever of the two is more recent. For interrupts,
@@ -314,12 +295,28 @@ export async function runStatusline(): Promise<void> {
   if (remainingSec > 0) {
     const lowWater = ttlSec * 0.25;
     const tone = remainingSec > lowWater ? GREEN : YELLOW;
-    process.stdout.write(
-      `${color(tone, "◉")} ${color(tone, "cache warm")} ${dim("·")} ${mode} ${dim("·")} ${color(tone, fmtRemaining(remainingSec) + " left")}${modelTag}`,
-    );
-  } else {
-    process.stdout.write(
-      `${color(RED, "○")} ${color(RED, "cache cold")} ${dim("·")} ${fmtElapsed(-remainingSec)} past${modelTag} ${dim("·")} ${color(YELLOW, "/compress to save tokens")}`,
-    );
+    return `${color(tone, "◉")} ${color(tone, "cache warm")} ${dim("·")} ${mode} ${dim("·")} ${color(tone, fmtRemaining(remainingSec) + " left")}${modelTag}`;
   }
+  return `${color(RED, "○")} ${color(RED, "cache cold")} ${dim("·")} ${fmtElapsed(-remainingSec)} past${modelTag} ${dim("·")} ${color(YELLOW, "/compress to save tokens")}`;
+}
+
+export async function runStatusline(): Promise<void> {
+  const raw = await readStdin(250);
+  let input: StatuslineInput = {};
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    // keep going; render what we can
+  }
+  const path = input.transcript_path;
+  const sessionId = input.session_id ?? "";
+  if (!path) {
+    process.stdout.write("");
+    return;
+  }
+
+  const modelLabel =
+    input.model?.display_name ?? input.model?.id?.replace(/^claude-/, "") ?? "";
+  const line = renderCacheLine(path, sessionId, modelLabel);
+  process.stdout.write(line);
 }

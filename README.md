@@ -106,6 +106,10 @@ Detects cache mode automatically (1h cache outlasts most breaks; 5m needs pings)
 
 `/loop` is Claude Code's native scheduling primitive; `/break` just computes the right interval based on your current cache TTL and session size. Copy the printed command and run it.
 
+### Quick check: `/ttl`
+
+Type `/ttl` for an on-demand readout of the same line the statusline shows — `◉ cache warm · 1h · 56:07 left` or `○ cache cold · 12m past · /compress to save tokens`. Useful when the statusline isn't installed, or when you want a freshly-rendered tick without waiting on the 1s refresh. Installed automatically with `claudecompress install`; works whether or not you launched through `ccw`.
+
 ### Any saved session: `bunx claudecompress`
 
 For sessions you didn't trim live, no install needed:

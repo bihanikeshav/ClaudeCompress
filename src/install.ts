@@ -16,10 +16,11 @@ const CLAUDE_HOME = join(homedir(), ".claude");
 const SETTINGS_PATH = join(CLAUDE_HOME, "settings.json");
 const COMMAND_PATH = join(CLAUDE_HOME, "commands", "compress.md");
 const BREAK_COMMAND_PATH = join(CLAUDE_HOME, "commands", "break.md");
+const TTL_COMMAND_PATH = join(CLAUDE_HOME, "commands", "ttl.md");
 
-// Hook matches both /compress and /break — the dispatcher in hook.ts
+// Hook matches /compress, /break, and /ttl — the dispatcher in hook.ts
 // decides which flow to run based on the prompt content.
-const HOOK_MATCHER = "^/(compress|break)\\b";
+const HOOK_MATCHER = "^/(compress|break|ttl)\\b";
 const HOOK_TAG = "claudecompress hook";
 
 /**
@@ -197,6 +198,16 @@ argument-hint: "[minutes]"
 Handled by the claudecompress UserPromptSubmit hook. Type \`/break 15\` for a
 15-minute break. The hook prints the right \`/loop\` command for your current
 cache mode; copy + run it to keep the cache warm while you're away.
+`,
+  );
+  writeFileSync(
+    TTL_COMMAND_PATH,
+    `---
+description: Show the prompt-cache TTL countdown (mirrors the claudecompress statusline).
+---
+
+Handled by the claudecompress UserPromptSubmit hook. If you are reading this
+message it means the hook did not run — see https://github.com/bihanikeshav/ClaudeCompress
 `,
   );
 }
@@ -473,7 +484,7 @@ export async function uninstall(): Promise<void> {
     removedStatusline = true;
   }
   let removedCommands = 0;
-  for (const p2 of [COMMAND_PATH, BREAK_COMMAND_PATH]) {
+  for (const p2 of [COMMAND_PATH, BREAK_COMMAND_PATH, TTL_COMMAND_PATH]) {
     try {
       if (existsSync(p2)) { unlinkSync(p2); removedCommands += 1; }
     } catch {}

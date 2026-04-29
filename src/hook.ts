@@ -17,6 +17,7 @@ import { estimateSessionTokens } from "./analyzer.ts";
 import { estimateColdResumeCost, findModel, formatUSD, type ModelInfo } from "./pricing.ts";
 import { logError, logEvent } from "./errorLog.ts";
 import { readStdin } from "./stdin.ts";
+import { renderCacheLine } from "./statusline.ts";
 import type { TrimMode, TrimOptions } from "./types.ts";
 
 interface HookInput {
@@ -95,6 +96,11 @@ function parseBreakArgs(prompt: string): { minutes: number } | null {
   const minutes = rest ? Number(rest) : 15;
   if (!Number.isFinite(minutes) || minutes <= 0) return { minutes: 15 };
   return { minutes: Math.min(minutes, 240) }; // cap at 4h
+}
+
+export function parseTtlArgs(prompt: string): {} | null {
+  const m = prompt.trim().match(/^\/ttl\b/);
+  return m ? {} : null;
 }
 
 /**
@@ -544,6 +550,24 @@ function pickCacheReadRate(model: ModelInfo): number {
 }
 
 // ---------------------------------------------------------------------------
+// /ttl flow
+// ---------------------------------------------------------------------------
+
+function runTtlHook(input: HookInput): void {
+  logEvent("hook.runTtlHook", "ttl hook invoked", {
+    under_ccw: Boolean(process.env.CCW_SIGNAL_FILE),
+  });
+  const sessionFile = resolveSessionFile(input);
+  if (!sessionFile) {
+    process.stderr.write("[claudecompress] could not locate active session JSONL\n");
+    process.exit(2);
+  }
+  const line = renderCacheLine(sessionFile, input.session_id ?? "");
+  process.stderr.write("\n" + line + "\n\n");
+  process.exit(2);
+}
+
+// ---------------------------------------------------------------------------
 // Dispatcher
 // ---------------------------------------------------------------------------
 
@@ -585,6 +609,12 @@ export async function runHook(): Promise<void> {
     const breakArgs = parseBreakArgs(prompt);
     if (breakArgs) {
       runBreakHook(input, breakArgs);
+      return;
+    }
+
+    const ttlArgs = parseTtlArgs(prompt);
+    if (ttlArgs) {
+      runTtlHook(input);
       return;
     }
 

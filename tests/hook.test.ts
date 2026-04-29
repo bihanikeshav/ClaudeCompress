@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { detectCacheState, parseCompressArgs } from "../src/hook.ts";
+import { detectCacheState, parseCompressArgs, parseTtlArgs } from "../src/hook.ts";
 import {
   makeTmpDir,
   userTextRecord,
@@ -257,5 +257,33 @@ describe("parseCompressArgs: legacy-mode handling", () => {
     expect(parseCompressArgs("/break")).toBeNull();
     expect(parseCompressArgs("hello there")).toBeNull();
     expect(parseCompressArgs("")).toBeNull();
+  });
+});
+
+describe("parseTtlArgs", () => {
+  test("matches bare /ttl", () => {
+    expect(parseTtlArgs("/ttl")).not.toBeNull();
+  });
+
+  test("matches /ttl with trailing space", () => {
+    expect(parseTtlArgs("/ttl ")).not.toBeNull();
+  });
+
+  test("matches /ttl with extra args (ignored)", () => {
+    expect(parseTtlArgs("/ttl extra")).not.toBeNull();
+  });
+
+  test("rejects other slash commands", () => {
+    expect(parseTtlArgs("/break")).toBeNull();
+    expect(parseTtlArgs("/compress")).toBeNull();
+  });
+
+  test("rejects plain text and empty", () => {
+    expect(parseTtlArgs("hello there")).toBeNull();
+    expect(parseTtlArgs("")).toBeNull();
+  });
+
+  test("rejects /ttlsomething (word boundary)", () => {
+    expect(parseTtlArgs("/ttlsomething")).toBeNull();
   });
 });
