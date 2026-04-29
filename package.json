@@ -1,6 +1,6 @@
 {
   "name": "claudecompress",
-  "version": "0.16.7",
+  "version": "0.16.8",
   "description": "Analyze and shrink Claude Code session transcripts so /resume loads faster and cheaper.",
   "type": "module",
   "bin": {
