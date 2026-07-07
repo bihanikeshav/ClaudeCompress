@@ -52,6 +52,16 @@ export interface RetentionScores {
   userAskRetention: number;
   /** Fraction of error snippets still present in trimmed error results. */
   errorRetention: number;
+  /**
+   * Char-survival of the last-5-turns' content (text, thinking, tool
+   * results), matched per-record by uuid and NORMALIZED against the
+   * lossless (squash-only) output — universal squash rewrites verbose
+   * tool outputs in every mode by design, so raw survival would brand
+   * even lossless as "lossy". 1.0 = the mode removes nothing recent
+   * beyond squash; lower = it truncates recent bodies (smart's band-0
+   * truncation was scoring "no measurable loss" without this dimension).
+   */
+  recentContentRetention: number;
 }
 
 /** Flatten a tool_result's content (string or block array) to plain text. */
@@ -137,12 +147,63 @@ function cleanTrimArtifacts(s: string): string {
   return out.replace(TRUNCATION_MARKER_RE, "");
 }
 
+/** Total content chars of a record's message (text, thinking, tool_result bodies). */
+function contentChars(rec: any): number {
+  const c = rec?.message?.content;
+  if (typeof c === "string") return c.length;
+  if (!Array.isArray(c)) return 0;
+  let n = 0;
+  for (const blk of c) {
+    if (!blk || typeof blk !== "object") continue;
+    if (typeof blk.text === "string") n += blk.text.length;
+    else if (typeof blk.thinking === "string") n += blk.thinking.length;
+    else if (blk.type === "tool_result") n += toolResultText(blk.content).length;
+    else if (blk.type === "tool_use") n += JSON.stringify(blk.input ?? {}).length;
+  }
+  return n;
+}
+
+/**
+ * Char-survival of the last N user turns' content, matched per-record by
+ * uuid (trims never rewrite uuids). 1.0 = every byte of recent context
+ * survives verbatim-or-longer; lower = a mode truncated recent bodies.
+ */
+export function recentContentRetention(
+  origRecords: any[],
+  trimmedRecords: any[],
+  lastNTurns = 5,
+): number {
+  const turnIdx: number[] = [];
+  origRecords.forEach((rec, i) => {
+    if (isUserTextTurn(rec)) turnIdx.push(i);
+  });
+  const cut = turnIdx.length <= lastNTurns ? 0 : turnIdx[turnIdx.length - lastNTurns]!;
+  const trimByUuid = new Map<string, number>();
+  for (const rec of trimmedRecords) {
+    if (typeof rec?.uuid === "string") trimByUuid.set(rec.uuid, contentChars(rec));
+  }
+  let orig = 0;
+  let kept = 0;
+  for (let i = cut; i < origRecords.length; i++) {
+    const rec = origRecords[i];
+    if (typeof rec?.uuid !== "string") continue;
+    const o = contentChars(rec);
+    orig += o;
+    kept += Math.min(trimByUuid.get(rec.uuid) ?? 0, o);
+  }
+  return orig === 0 ? 1 : kept / orig;
+}
+
 /**
  * Score how much of `ground` (extracted from the ORIGINAL session) is still
  * present in `trimmedRecords` (parsed from the TRIMMED session). Empty
  * ground-truth dimensions score 1.0 — nothing to lose means nothing lost.
  */
-export function scoreRetention(ground: SessionSignals, trimmedRecords: any[]): RetentionScores {
+export function scoreRetention(
+  ground: SessionSignals,
+  trimmedRecords: any[],
+  origRecords?: any[],
+): RetentionScores {
   const trimmed = extractSignals(trimmedRecords);
 
   // --- artifact retention: path discoverable ANYWHERE in the trimmed
@@ -220,6 +281,9 @@ export function scoreRetention(ground: SessionSignals, trimmedRecords: any[]): R
     toolSkeletonRetention: frac(skeletonHits, ground.toolSkeleton.length),
     userAskRetention: frac(askHits, ground.userAsks.length),
     errorRetention: frac(errorHits, ground.errorSnippets.length),
+    recentContentRetention: origRecords
+      ? recentContentRetention(origRecords, trimmedRecords)
+      : 1,
   };
 }
 
@@ -437,6 +501,7 @@ function verdictFor(scores: RetentionScores): string {
     ["tool skeleton", scores.toolSkeletonRetention],
     ["user asks", scores.userAskRetention],
     ["errors", scores.errorRetention],
+    ["recent content", scores.recentContentRetention],
   ];
   dims.sort((a, b) => a[1] - b[1]);
   const [worstName, worst] = dims[0]!;
@@ -455,6 +520,55 @@ export interface ProbeRow {
 }
 
 /**
+ * claude-code's /resume replays from the LAST compact summary record —
+ * everything before it is dead weight the API never sees again. Ground
+ * truth and retention must be scoped to this window, or a recently
+ * /compact'ed session reports phantom losses (tool calls that were
+ * already summarized away) and inflated totals.
+ */
+export function sliceFromLastCompact(records: any[]): { records: any[]; compacted: boolean } {
+  let last = -1;
+  for (let i = records.length - 1; i >= 0; i--) {
+    if (records[i]?.isCompactSummary === true) {
+      last = i;
+      break;
+    }
+  }
+  return last >= 0
+    ? { records: records.slice(last), compacted: true }
+    : { records, compacted: false };
+}
+
+/**
+ * Raw recent-content survival of the lossless (squash-only) output. This
+ * is the normalization baseline: squash applies in every mode, so a mode's
+ * recent score = its raw survival relative to this.
+ */
+async function losslessRecentBaseline(sessionPath: string, origRecords: any[]): Promise<number> {
+  let outPath: string | null = null;
+  try {
+    const result = await trimSession(sessionPath, { mode: "lossless" });
+    outPath = result.path;
+    const records = sliceFromLastCompact(readJsonlRecords(outPath)).records;
+    return recentContentRetention(origRecords, records);
+  } catch (err) {
+    logError("probes.losslessRecentBaseline", err, { sessionPath });
+    return 1; // fall back to raw scoring
+  } finally {
+    if (outPath) {
+      try {
+        unlinkSync(outPath);
+      } catch {}
+    }
+  }
+}
+
+function normalizedRecent(origRecords: any[], trimmedRecords: any[], baseline: number): number {
+  const raw = recentContentRetention(origRecords, trimmedRecords);
+  return baseline > 0 ? Math.min(1, raw / baseline) : 1;
+}
+
+/**
  * Deterministic probe pass over one session — the shared core behind
  * `claudecompress probe` and the /probe slash command (which runs inside
  * a hook and needs results without console output or process.exit).
@@ -463,18 +577,20 @@ export interface ProbeRow {
 export async function probeSession(
   sessionPath: string,
   modes: TrimMode[] = [...ALL_MODES],
-): Promise<{ origTokens: number; ground: SessionSignals; rows: ProbeRow[] }> {
-  const origRecords = readJsonlRecords(sessionPath);
+): Promise<{ origTokens: number; ground: SessionSignals; rows: ProbeRow[]; compacted: boolean }> {
+  const { records: origRecords, compacted } = sliceFromLastCompact(readJsonlRecords(sessionPath));
   const ground = extractSignals(origRecords);
   const origTokens = roughContextTokens(sessionPath);
+  const baselineRecent = await losslessRecentBaseline(sessionPath, origRecords);
   const rows: ProbeRow[] = [];
   for (const mode of modes) {
     let outPath: string | null = null;
     try {
       const result = await trimSession(sessionPath, optsForMode(mode));
       outPath = result.path;
-      const trimmedRecords = readJsonlRecords(outPath);
+      const trimmedRecords = sliceFromLastCompact(readJsonlRecords(outPath)).records;
       const scores = scoreRetention(ground, trimmedRecords);
+      scores.recentContentRetention = normalizedRecent(origRecords, trimmedRecords, baselineRecent);
       const tokensAfter = roughContextTokens(outPath);
       const savedPct = origTokens === 0 ? 0 : Math.max(0, (1 - tokensAfter / origTokens) * 100);
       rows.push({ mode, tokensAfter, savedPct, scores, verdict: verdictFor(scores) });
@@ -488,7 +604,7 @@ export async function probeSession(
       }
     }
   }
-  return { origTokens, ground, rows };
+  return { origTokens, ground, rows, compacted };
 }
 
 interface ProbeArgs {
@@ -568,9 +684,17 @@ export async function runProbe(args: string[]): Promise<void> {
     }
   }
 
-  const origRecords = readJsonlRecords(sessionPath);
+  const { records: origRecords, compacted } = sliceFromLastCompact(readJsonlRecords(sessionPath));
   const ground = extractSignals(origRecords);
   const origTokens = roughContextTokens(sessionPath);
+  const baselineRecent = await losslessRecentBaseline(sessionPath, origRecords);
+  if (compacted && !parsed.json) {
+    console.log(
+      pc.dim(
+        "note: session was /compact'ed — scoring only the post-compact window (what /resume replays)",
+      ),
+    );
+  }
 
   interface ModeRow {
     mode: TrimMode;
@@ -587,8 +711,9 @@ export async function runProbe(args: string[]): Promise<void> {
     try {
       const result = await trimSession(sessionPath, optsForMode(mode));
       outPath = result.path;
-      const trimmedRecords = readJsonlRecords(outPath);
+      const trimmedRecords = sliceFromLastCompact(readJsonlRecords(outPath)).records;
       const scores = scoreRetention(ground, trimmedRecords);
+      scores.recentContentRetention = normalizedRecent(origRecords, trimmedRecords, baselineRecent);
       const tokensAfter = roughContextTokens(outPath);
       const savedPct = origTokens === 0 ? 0 : Math.max(0, (1 - tokensAfter / origTokens) * 100);
       const llm = auth ? await runLlmProbes(auth, trimmedRecords, ground.artifacts, mode) : null;
@@ -627,6 +752,7 @@ export async function runProbe(args: string[]): Promise<void> {
             toolSkeletonRetention: r.scores.toolSkeletonRetention,
             userAskRetention: r.scores.userAskRetention,
             errorRetention: r.scores.errorRetention,
+            recentContentRetention: r.scores.recentContentRetention,
             verdict: r.verdict,
             llm: r.llm
               ? {
@@ -660,9 +786,9 @@ export async function runProbe(args: string[]): Promise<void> {
   );
   console.log();
   console.log(
-    `  ${"mode".padEnd(10)}${"saved".padStart(8)}${"artifact".padStart(10)}${"skeleton".padStart(10)}${"user-asks".padStart(11)}${"errors".padStart(9)}`,
+    `  ${"mode".padEnd(10)}${"saved".padStart(8)}${"artifact".padStart(10)}${"skeleton".padStart(10)}${"user-asks".padStart(11)}${"errors".padStart(9)}${"recent".padStart(9)}`,
   );
-  console.log("  " + "-".repeat(58));
+  console.log("  " + "-".repeat(67));
   for (const r of rows) {
     console.log(
       `  ${r.mode.padEnd(10)}` +
@@ -670,7 +796,8 @@ export async function runProbe(args: string[]): Promise<void> {
         `${pct(r.scores.artifactRetention).padStart(10)}` +
         `${pct(r.scores.toolSkeletonRetention).padStart(10)}` +
         `${pct(r.scores.userAskRetention).padStart(11)}` +
-        `${pct(r.scores.errorRetention).padStart(9)}`,
+        `${pct(r.scores.errorRetention).padStart(9)}` +
+        `${pct(r.scores.recentContentRetention).padStart(9)}`,
     );
   }
   console.log();

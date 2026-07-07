@@ -474,6 +474,24 @@ export async function trimSession(
     // and nothing downstream needs them on resume.
     if (rec?.type === "file-history-snapshot") continue;
 
+    // The /compact summary record is SACRED in every mode. claude-code's
+    // /resume replays from the LAST such record — it IS the distilled
+    // replacement for everything before it. Truncating it destroys the
+    // summarized context; dropping it resurrects the entire pre-compact
+    // history on resume. (Found live: smart's band rules were mangling it,
+    // reporting phantom 83% savings on a freshly-compacted session.)
+    if (rec?.isCompactSummary === true) {
+      const kept = { ...rec, ...(rec.sessionId ? { sessionId: newSid } : {}) };
+      if (opts.mode === "slim") {
+        // Keep the reparenting chain intact around the preserved record.
+        kept.parentUuid = lastKeptUuid ?? kept.parentUuid ?? null;
+        lastKeptUuid = kept.uuid ?? lastKeptUuid;
+      }
+      outStream.write(JSON.stringify(kept) + "\n");
+      trimmedLines += 1;
+      continue;
+    }
+
     const inRecent = needsCutoff && recordIdx >= cutoffRecordIdx;
     let newRec: any | null;
     if (opts.mode === "lossless") {

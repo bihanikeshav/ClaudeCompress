@@ -64,7 +64,7 @@ Measured on a 760k-token Opus session (153 user turns):
 | **smart** | ~67% | Low-Med | per-component rules by turn depth; tool_use skeleton always survives |
 | **slim** (N=5) | ~73% | Med | last N verbatim; older turns become dialog-only (loses breadcrumbs) |
 
-`safe` implements **observation masking**, which JetBrains' 2025 NeurIPS study ("The Complexity Trap") found matches or beats LLM summarization on SWE-bench at 52% lower cost. `slim`'s extra aggression is unvalidated by public benchmarks — run `/probe` on your own session to see exactly what each mode preserves. Details and decay curves: [theory →](https://bihanikeshav.github.io/ClaudeCompress/theory/)
+`safe` implements **observation masking**, which JetBrains' 2025 NeurIPS study ("The Complexity Trap") found matches or beats LLM summarization on SWE-bench at 52% lower cost, and it is the only lossy mode that keeps recent-turn content 100% intact (fleet-measured). `smart` saves more partly by truncating recent tool results — its `recent` probe score averages ~91% and can drop below 60% on tool-heavy sessions. Run `/probe` on your own session to see exactly what each mode preserves. Details and decay curves: [theory →](https://bihanikeshav.github.io/ClaudeCompress/theory/)
 
 **N counts your messages**: `safe 5` keeps the last 5 back-and-forths (including all tool activity within them) fully intact.
 
@@ -97,7 +97,7 @@ claudecompress probe [session] [--modes safe,slim] [--json] [--llm]
 ```
 
 - `analyze` is read-only (savings are measured on temp copies). `gc` batch-trims cold sessions — plan first, confirm, originals untouched, already-trimmed sessions skipped.
-- `probe` scores what survives each mode: files modified, tool skeleton, your last 10 asks, every error. `--llm` adds Haiku-graded recovery questions (needs API creds).
+- `probe` scores what survives each mode: files modified, tool skeleton, your last 10 asks, every error, and verbatim survival of recent-turn content (normalized against squash). Sessions that were `/compact`'ed are scored on the post-compact window — what `/resume` actually replays. `--llm` adds Haiku-graded recovery questions (needs API creds).
 - Every trim (slash, CLI, or `ccw`) is logged to `~/.claude/claudecompress/history.jsonl`.
 
 ## `ccw`, the auto-resume wrapper

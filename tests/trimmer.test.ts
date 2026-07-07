@@ -333,6 +333,44 @@ describe("trimmer: masking safety rules", () => {
     }
   });
 
+  test("the /compact summary record survives every mode verbatim", async () => {
+    const { dir, cleanup } = makeTmpDir();
+    try {
+      const input = join(dir, "in.jsonl");
+      const summaryText = "This session is being continued from a previous conversation: " + "detail ".repeat(200);
+      const compact = userTextRecord(summaryText);
+      compact.isCompactSummary = true;
+      const records = [
+        userTextRecord("old turn 1"),
+        assistantTextRecord("old reply 1"),
+        compact,
+        // 20 turns after the compact so the summary sits outside every
+        // keep-window and in the deepest smart band.
+        ...Array.from({ length: 20 }, (_, i) => [
+          userTextRecord(`post ${i}`),
+          assistantTextRecord(`post reply ${i}`),
+        ]).flat(),
+      ];
+      writeJsonl(input, records);
+
+      for (const opts of [
+        { mode: "lossless" as const },
+        { mode: "safe" as const, keepLastN: 5, dropThinking: true },
+        { mode: "smart" as const },
+        { mode: "slim" as const, keepLastN: 5, dropThinking: true },
+      ]) {
+        const result = await trimSession(input, opts);
+        const out = readJsonl(result.path);
+        const kept = out.filter((r) => r.isCompactSummary === true);
+        expect(kept.length).toBe(1);
+        // Verbatim — not truncated, not dialog-stripped.
+        expect(kept[0]!.message.content).toBe(summaryText);
+      }
+    } finally {
+      cleanup();
+    }
+  });
+
   test("a Read superseded by a later Write to the same path is elided", async () => {
     const { dir, cleanup } = makeTmpDir();
     try {

@@ -260,3 +260,55 @@ describe("probes: LLM answer scoring (pure, no network)", () => {
     expect(recall).toBe(1);
   });
 });
+
+describe("probes: compact-boundary scoping", () => {
+  test("ground truth ignores records before the last compact summary", async () => {
+    const { mkdtempSync, rmSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const { probeSession, sliceFromLastCompact } = await import("../src/probes.ts");
+    const { userTextRecord, assistantTextRecord, toolResultRecord } = await import("./helpers.ts");
+
+    const preEdit = assistantTextRecord("editing old file");
+    preEdit.message.content = [
+      { type: "text", text: "editing old file" },
+      { type: "tool_use", id: "t-pre", name: "Edit", input: { file_path: "/pre/old.ts", old_string: "a", new_string: "b" } },
+    ];
+    const compact = userTextRecord("Summary of everything before this point.");
+    (compact as any).isCompactSummary = true;
+    const postEdit = assistantTextRecord("editing new file");
+    postEdit.message.content = [
+      { type: "text", text: "editing new file" },
+      { type: "tool_use", id: "t-post", name: "Edit", input: { file_path: "/post/new.ts", old_string: "c", new_string: "d" } },
+    ];
+    const records = [
+      userTextRecord("pre-compact ask"),
+      preEdit,
+      toolResultRecord("done", "t-pre"),
+      compact,
+      userTextRecord("post-compact ask"),
+      postEdit,
+      toolResultRecord("done", "t-post"),
+      assistantTextRecord("all set"),
+    ];
+
+    const sliced = sliceFromLastCompact(records);
+    expect(sliced.compacted).toBe(true);
+    expect(sliced.records[0]!.isCompactSummary).toBe(true);
+
+    const dir = mkdtempSync(join(tmpdir(), "ccw-probe-compact-"));
+    try {
+      const path = join(dir, "s.jsonl");
+      writeFileSync(path, records.map((r) => JSON.stringify(r)).join("\n") + "\n");
+      const { ground, rows, compacted } = await probeSession(path, ["safe"]);
+      expect(compacted).toBe(true);
+      // Only the post-compact artifact counts as ground truth.
+      expect(ground.artifacts).toEqual(["/post/new.ts"]);
+      // Nothing pre-compact can register as a loss.
+      expect(rows[0]!.scores.artifactRetention).toBe(1);
+      expect(rows[0]!.scores.toolSkeletonRetention).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -836,18 +836,26 @@ async function runProbeHook(input: HookInput): Promise<void> {
     process.stderr.write("[claudecompress] /probe: could not locate this session's file.\n");
     process.exit(2);
   }
-  const { origTokens, ground, rows } = await probeSession(sessionFile);
+  const { origTokens, ground, rows, compacted } = await probeSession(sessionFile);
   const lines = [
     "",
     "┌─ claudecompress probe · this session ────────────────────────────┐",
     `  ${fmtTokens(origTokens)} tokens · ${ground.artifacts.length} files modified · ${ground.toolSkeleton.length} tool calls · ${ground.errorSnippets.length} errors`,
-    "",
-    "  mode       saved   files  skeleton  asks  errors",
-    "  -------------------------------------------------",
   ];
+  if (compacted) {
+    lines.push(
+      "  note: session was /compact'ed — scoring the post-compact window",
+      "        (what /resume replays); earlier history is already summarized.",
+    );
+  }
+  lines.push(
+    "",
+    "  mode       saved   files  skeleton  asks  errors  recent",
+    "  ---------------------------------------------------------",
+  );
   for (const r of rows) {
     lines.push(
-      `  ${r.mode.padEnd(9)}${(r.savedPct.toFixed(1) + "%").padStart(6)}  ${pctStr(r.scores.artifactRetention).padStart(6)}  ${pctStr(r.scores.toolSkeletonRetention).padStart(8)}  ${pctStr(r.scores.userAskRetention).padStart(4)}  ${pctStr(r.scores.errorRetention).padStart(6)}`,
+      `  ${r.mode.padEnd(9)}${(r.savedPct.toFixed(1) + "%").padStart(6)}  ${pctStr(r.scores.artifactRetention).padStart(6)}  ${pctStr(r.scores.toolSkeletonRetention).padStart(8)}  ${pctStr(r.scores.userAskRetention).padStart(4)}  ${pctStr(r.scores.errorRetention).padStart(6)}  ${pctStr(r.scores.recentContentRetention).padStart(6)}`,
     );
   }
   lines.push("", "  verdicts:");
