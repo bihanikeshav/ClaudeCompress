@@ -34,7 +34,11 @@ jobs:
         run: bun test tests/
 
       - name: Typecheck
-        run: npx --no-install tsc --noEmit
+        # Invoke the compiler entrypoint directly: `npx tsc` is unreliable
+        # here — "tsc" is a squatted npm package name, and npx on a
+        # bun-installed node_modules failed to resolve the local binary on
+        # the windows-latest runner, then tried to fetch the decoy package.
+        run: node node_modules/typescript/bin/tsc --noEmit
 
       - name: Build
         run: bun run build
