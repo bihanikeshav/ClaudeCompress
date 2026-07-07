@@ -3,6 +3,7 @@ import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   readFileSync,
+  readdirSync,
   unlinkSync,
   mkdirSync,
   statSync,
@@ -13,9 +14,10 @@ import { join, dirname, basename } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { trimSession } from "./trimmer.ts";
-import { estimateSessionTokens } from "./analyzer.ts";
-import { findModel } from "./pricing.ts";
-import { countTokensForSession, roughContextTokens } from "./tokenCounter.ts";
+import { tokensFor } from "./tokenCounter.ts";
+import { findModel, estimateColdResumeCost } from "./pricing.ts";
+import { recordTrim } from "./history.ts";
+import { detectCacheState } from "./hook.ts";
 import { logError, logEvent } from "./errorLog.ts";
 import type { TrimMode, TrimOptions, TrimResult } from "./types.ts";
 
@@ -32,18 +34,44 @@ interface PendingTrimSignal {
   opts: TrimOptions & { force?: boolean; legacyMode?: string; renamedFrom?: string };
 }
 
-const SIGNAL_FILE = join(
-  homedir(),
-  ".claude",
-  "claudecompress",
-  "next-resume",
-);
+// One signal file PER ccw INSTANCE. Earlier versions used a single fixed
+// path shared by every running ccw — when one session's /compress hook
+// wrote it, EVERY ccw watcher saw the mtime change and killed its own
+// claude, closing all of the user's parallel sessions at once. Keying on
+// pid scopes the compress→respawn dance to the terminal that asked for it.
+const SIGNAL_DIR = join(homedir(), ".claude", "claudecompress");
+const SIGNAL_FILE = join(SIGNAL_DIR, `next-resume-${process.pid}`);
 
 function ensureDir(): void {
   try {
-    mkdirSync(dirname(SIGNAL_FILE), { recursive: true });
+    mkdirSync(SIGNAL_DIR, { recursive: true });
   } catch {
     // ignore
+  }
+}
+
+/**
+ * Remove leftover signal files from previous ccw runs: the legacy fixed
+ * "next-resume" path and any pid-suffixed sibling older than a day (its
+ * ccw is long gone; pids recycle, so a stale file could otherwise trigger
+ * a phantom kill in a future run that reuses the pid).
+ */
+function cleanupStaleSignals(): void {
+  try {
+    for (const f of readdirSync(SIGNAL_DIR)) {
+      if (!f.startsWith("next-resume")) continue;
+      const p = join(SIGNAL_DIR, f);
+      if (p === SIGNAL_FILE) continue;
+      try {
+        const st = statSync(p);
+        const isLegacy = f === "next-resume";
+        if (isLegacy || Date.now() - st.mtimeMs > 24 * 3600 * 1000) unlinkSync(p);
+      } catch {
+        // ignore per-file races
+      }
+    }
+  } catch {
+    // dir may not exist yet
   }
 }
 
@@ -408,34 +436,6 @@ function printCompressBanner(
   process.stdout.write(out.join("\n"));
 }
 
-/**
- * Resolve two token counts for a session JSONL:
- *   - `contextLike` matches what /context's "Messages" line would show
- *     (disk-side rough heuristic, calibrated to dormant sessions ~1%).
- *   - `apiCost` is the real count_tokens result — the actual Anthropic
- *     bill on the first request after /resume.
- *
- * We display contextLike as the headline number (so users see the same
- * number /context shows) and apiCost as a secondary line so the real
- * cost is still visible. If the API call fails (no creds, offline), we
- * fall back to the prose-tuned char estimator and flag `approx=true`.
- */
-async function tokensFor(path: string): Promise<{
-  contextLike: number;
-  apiCost: number;
-  approx: boolean;
-}> {
-  const contextLike = roughContextTokens(path);
-  try {
-    const r = await countTokensForSession(path);
-    return { contextLike, apiCost: r.inputTokens, approx: false };
-  } catch (err) {
-    logError("ccw.tokensFor.countTokens", err, { path });
-    const model = findModel("claude-opus-4-7")!;
-    return { contextLike, apiCost: estimateSessionTokens(path, model), approx: true };
-  }
-}
-
 async function performPendingTrim(sig: PendingTrimSignal): Promise<string | null> {
   const shortOrig = basename(sig.session, ".jsonl").slice(0, 8);
   logEvent("ccw.performPendingTrim", "compress start", {
@@ -479,6 +479,29 @@ async function performPendingTrim(sig: PendingTrimSignal): Promise<string | null
       );
     }
     printCompressBanner(result, sig.opts, shortOrig, tokensBefore, tokensAfter, tokenReductionPct, approx, apiBefore, apiAfter);
+    // Log to the lifetime-savings history (previously only interactive-CLI
+    // trims were recorded, so /compress-driven savings never showed up in
+    // `claudecompress history`). Priced against the session's detected
+    // model and cache mode.
+    try {
+      const model = findModel(tb.model);
+      const cacheMode = detectCacheState(sig.session).mode;
+      recordTrim({
+        timestamp: new Date().toISOString(),
+        mode: sig.opts.mode,
+        model: model.id,
+        sourcePath: sig.session,
+        outputPath: result.path,
+        bytesBefore: result.originalBytes,
+        bytesAfter: result.trimmedBytes,
+        tokensBefore: apiBefore,
+        tokensAfter: apiAfter,
+        costBefore: estimateColdResumeCost(apiBefore, model, cacheMode),
+        costAfter: estimateColdResumeCost(apiAfter, model, cacheMode),
+      });
+    } catch (err) {
+      logError("ccw.performPendingTrim.recordTrim", err);
+    }
     logEvent("ccw.performPendingTrim", "compress success", {
       originalLines: result.originalLines,
       trimmedLines: result.trimmedLines,
@@ -517,6 +540,7 @@ function expandShortcuts(args: string[]): string[] {
 
 async function main(): Promise<void> {
   ensureDir();
+  cleanupStaleSignals();
   clearSignal();
   const originalArgs = expandShortcuts(process.argv.slice(2));
   logEvent("ccw.main", "ccw started", { argv: originalArgs });

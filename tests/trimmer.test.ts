@@ -177,8 +177,9 @@ describe("trimmer: mode semantics", () => {
       const result = await trimSession(input, { mode: "safe", keepLastN: 1 });
       const out = readJsonl(result.path);
 
-      // Find the masked tool_result: its content should be an empty
-      // string after redactToolResult.
+      // Find the masked tool_result: its body is replaced with the same
+      // elision string claude-code's native microcompact writes (model-
+      // familiar, and never an empty content the API could reject).
       const trOut = out.find(
         (r) =>
           r.type === "user" &&
@@ -186,7 +187,7 @@ describe("trimmer: mode semantics", () => {
           r.message.content[0]?.type === "tool_result",
       );
       expect(trOut).toBeDefined();
-      expect(trOut!.message.content[0].content).toBe("");
+      expect(trOut!.message.content[0].content).toBe("[Read output elided]");
 
       // All four user text messages should still be present.
       const userTexts = out
@@ -247,6 +248,115 @@ describe("trimmer: mode semantics", () => {
       for (const rec of out) {
         expect(rec.sessionId).toBe(result.newSessionId);
       }
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("trimmer: masking safety rules", () => {
+  function toolCycle(name: string, id: string, input: any, resultContent: string, isError = false) {
+    const a = assistantTextRecord(`calling ${name}`);
+    a.message.content = [
+      { type: "text", text: `calling ${name}` },
+      { type: "tool_use", id, name, input },
+    ];
+    const tr = toolResultRecord(resultContent, id);
+    if (isError) tr.message.content[0].is_error = true;
+    return [a, tr];
+  }
+
+  test("error tool_results are never masked (safe mode)", async () => {
+    const { dir, cleanup } = makeTmpDir();
+    try {
+      const input = join(dir, "in.jsonl");
+      const records = [
+        userTextRecord("msg 1"),
+        ...toolCycle("Bash", "t-err", { command: "npm test" }, "Error: 3 tests failed\nassert foo", true),
+        userTextRecord("msg 2"),
+        assistantTextRecord("a2"),
+        userTextRecord("msg 3"),
+        assistantTextRecord("a3"),
+      ];
+      writeJsonl(input, records);
+
+      const result = await trimSession(input, { mode: "safe", keepLastN: 1 });
+      const out = readJsonl(result.path);
+      const tr = out.find(
+        (r) => Array.isArray(r.message?.content) && r.message.content[0]?.type === "tool_result",
+      );
+      expect(tr).toBeDefined();
+      // Outside the recent window, but is_error → body preserved.
+      expect(tr!.message.content[0].content).toContain("3 tests failed");
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("smart mode never leaves a tool_use without its tool_result (deep bands)", async () => {
+    const { dir, cleanup } = makeTmpDir();
+    try {
+      const input = join(dir, "in.jsonl");
+      const records: any[] = [];
+      // First turn: a Grep cycle whose result the band-2 rules would DROP.
+      records.push(userTextRecord("msg 1"));
+      records.push(...toolCycle("Grep", "t-grep", { pattern: "foo" }, "match1\nmatch2\nmatch3"));
+      // 20 more user turns to push the Grep cycle into band 2 (16+).
+      for (let i = 2; i <= 21; i += 1) {
+        records.push(userTextRecord(`msg ${i}`));
+        records.push(assistantTextRecord(`reply ${i}`));
+      }
+      writeJsonl(input, records);
+
+      const result = await trimSession(input, { mode: "smart" });
+      const out = readJsonl(result.path);
+
+      const useIds = new Set<string>();
+      const resultIds = new Set<string>();
+      for (const r of out) {
+        const c = r.message?.content;
+        if (!Array.isArray(c)) continue;
+        for (const b of c) {
+          if (b?.type === "tool_use") useIds.add(b.id);
+          if (b?.type === "tool_result") resultIds.add(b.tool_use_id);
+        }
+      }
+      // Every surviving tool_use must have a paired tool_result.
+      for (const id of useIds) expect(resultIds.has(id)).toBe(true);
+      // The grep body itself is elided, not kept.
+      const grepTr = out.find(
+        (r) => Array.isArray(r.message?.content) && r.message.content[0]?.tool_use_id === "t-grep",
+      );
+      expect(grepTr!.message.content[0].content).toBe("[Grep output elided]");
+    } finally {
+      cleanup();
+    }
+  });
+
+  test("a Read superseded by a later Write to the same path is elided", async () => {
+    const { dir, cleanup } = makeTmpDir();
+    try {
+      const input = join(dir, "in.jsonl");
+      const records = [
+        userTextRecord("msg 1"),
+        ...toolCycle("Read", "t-read", { file_path: "/src/app.ts" }, "old file contents that are now stale"),
+        ...toolCycle("Edit", "t-edit", { file_path: "/src/app.ts", old_string: "a", new_string: "b" }, "Edit applied"),
+        userTextRecord("msg 2"),
+        assistantTextRecord("a2"),
+      ];
+      writeJsonl(input, records);
+
+      const result = await trimSession(input, { mode: "lossless" });
+      const out = readJsonl(result.path);
+      const readTr = out.find(
+        (r) => Array.isArray(r.message?.content) && r.message.content[0]?.tool_use_id === "t-read",
+      );
+      expect(readTr!.message.content[0].content).toBe("[Read output elided]");
+      // The Edit's own confirmation is untouched.
+      const editTr = out.find(
+        (r) => Array.isArray(r.message?.content) && r.message.content[0]?.tool_use_id === "t-edit",
+      );
+      expect(editTr!.message.content[0].content).toBe("Edit applied");
     } finally {
       cleanup();
     }

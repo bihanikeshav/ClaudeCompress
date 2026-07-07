@@ -92,6 +92,7 @@ function parseLatest(
       last_user_ts: null,
       last_stop_reason: null,
       is_1h_cache: false,
+      last_user_interrupted: false,
     };
   }
   const lines = data.split("\n");
@@ -113,7 +114,20 @@ function parseLatest(
       continue;
     }
     const ts: string | null = rec?.timestamp ?? null;
-    if (!lastUserTs && rec?.type === "user" && !isClientSideCommandRecord(rec)) {
+    if (
+      !lastUserTs &&
+      rec?.type === "user" &&
+      !isClientSideCommandRecord(rec) &&
+      // /compact writes its summary as a *user* record (isCompactSummary),
+      // and the CLI injects ambient-context user records (isMeta) and
+      // display-only records. None of these mean "an API call is in
+      // flight" — treating them as the latest user turn left the
+      // statusline stuck on "cache active · agent working" after every
+      // /compact until the next real message.
+      rec?.isCompactSummary !== true &&
+      rec?.isMeta !== true &&
+      rec?.isVisibleInTranscriptOnly !== true
+    ) {
       lastUserTs = ts;
       lastUserInterrupted = isInterruptRecord(rec);
     }
@@ -157,6 +171,19 @@ function parseLatest(
  */
 const TOOL_USE_GRACE_SEC = 30;
 
+/**
+ * Cap on how long a "user record is newest → API call in flight" state may
+ * claim the agent is working. Claude Code writes assistant records
+ * progressively during a turn, so a user record sitting newest for many
+ * minutes with zero assistant writes means no call is actually in flight
+ * (session closed mid-prompt, crashed call, stray record). Without this
+ * cap the statusline shows "cache active" forever. 10 minutes leaves
+ * headroom for the longest single thinking stretch before the first
+ * assistant record lands; being wrong self-corrects on the next JSONL
+ * write.
+ */
+const USER_WORKING_GRACE_SEC = 600;
+
 function fmtRemaining(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   const h = Math.floor(s / 3600);
@@ -175,7 +202,8 @@ function fmtElapsed(seconds: number): string {
 
 // ANSI color helpers. Kept minimal — no TrueColor or unusual sequences, so
 // this works across Windows Terminal, Git Bash, iTerm2, Kitty, Linux ttys.
-// NO_COLOR env var (https://no-color.org) and non-TTY stdout disable colors.
+// Only NO_COLOR (https://no-color.org) disables colors — stdout is a pipe
+// to Claude Code here (never a TTY), and Claude Code renders the ANSI.
 const COLORS_ENABLED = !process.env.NO_COLOR;
 const R = COLORS_ENABLED ? "\x1b[0m" : "";
 const DIM = COLORS_ENABLED ? "\x1b[2m" : "";
@@ -264,7 +292,12 @@ export function renderCacheLine(
 
   let working = false;
   if (userNewer && !latest.last_user_interrupted) {
-    working = true; // case A
+    // case A — but only within a grace window. A user record that stays
+    // newest for many minutes with no assistant writes means nothing is
+    // actually running; fall through to the countdown instead of
+    // showing "cache active" forever.
+    const userAgeSec = (Date.now() - userTs!.getTime()) / 1000;
+    if (userAgeSec < USER_WORKING_GRACE_SEC) working = true;
   } else if (midTurn && assistantTs) {
     const ageSec = (Date.now() - assistantTs.getTime()) / 1000;
     if (ageSec < TOOL_USE_GRACE_SEC) working = true; // case B

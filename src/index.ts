@@ -12,7 +12,8 @@ import {
   staleness,
   type CacheState,
 } from "./paths.ts";
-import { analyze, estimateSessionTokens, summarizeSession } from "./analyzer.ts";
+import { analyze, detectSessionModel, summarizeSession } from "./analyzer.ts";
+import { roughContextTokens } from "./tokenCounter.ts";
 import { trimSession } from "./trimmer.ts";
 import type { TrimMode, TrimOptions } from "./types.ts";
 import {
@@ -34,7 +35,7 @@ function cacheTag(state: CacheState, label: string): string {
 async function pickModel(): Promise<ModelInfo | null> {
   const choice = await p.select({
     message: "Which Claude model are you using?",
-    initialValue: "claude-opus-4-7",
+    initialValue: "claude-opus-4-8",
     options: MODELS.map((m) => ({
       value: m.id,
       label: `${m.label}  ${pc.dim(`$${m.inputPerMillion}/M input`)}`,
@@ -164,7 +165,7 @@ async function estimateModeSavings(
   defaultN = 15,
 ): Promise<Record<string, { after: number; saved: number }>> {
   const { unlinkSync } = await import("node:fs");
-  const baseTokens = estimateSessionTokens(sessionPath, model);
+  const baseTokens = roughContextTokens(sessionPath);
   const baseCost = estimateColdResumeCost(baseTokens, model);
 
   const jobs: { key: string; opts: TrimOptions }[] = [
@@ -178,7 +179,7 @@ async function estimateModeSavings(
   for (const { key, opts } of jobs) {
     try {
       const { path: outPath } = await trimSession(sessionPath, opts);
-      const afterTokens = estimateSessionTokens(outPath, model);
+      const afterTokens = roughContextTokens(outPath);
       const afterCost = estimateColdResumeCost(afterTokens, model);
       out[key] = { after: afterCost, saved: Math.max(0, baseCost - afterCost) };
       try { unlinkSync(outPath); } catch (err) {
@@ -310,6 +311,11 @@ async function runHistory(): Promise<void> {
 
 async function main() {
   const [, , sub] = process.argv;
+  if (sub === "--version" || sub === "-v" || sub === "version") {
+    const { VERSION } = await import("./version.ts");
+    console.log(`claudecompress ${VERSION}`);
+    return;
+  }
   if (sub === "history") {
     await runHistory();
     return;
@@ -344,6 +350,26 @@ async function main() {
     await uninstall();
     return;
   }
+  if (sub === "diff") {
+    const { runDiff } = await import("./diffview.ts");
+    await runDiff(process.argv.slice(3));
+    return;
+  }
+  if (sub === "analyze") {
+    const { runAnalyze } = await import("./analyzeCmd.ts");
+    await runAnalyze(process.argv.slice(3));
+    return;
+  }
+  if (sub === "gc") {
+    const { runGc } = await import("./gc.ts");
+    await runGc(process.argv.slice(3));
+    return;
+  }
+  if (sub === "probe") {
+    const { runProbe } = await import("./probes.ts");
+    await runProbe(process.argv.slice(3));
+    return;
+  }
 
   console.clear();
   p.intro(pc.bgCyan(pc.black(" claudecompress ")));
@@ -371,8 +397,17 @@ async function main() {
 
   const sessionInfo = summarizeSession(session);
   const stale = staleness(sessionInfo.mtime);
-  const beforeTokens = estimateSessionTokens(session, model);
+  // /context-calibrated heuristic (stringify/6) rather than the old
+  // chars/3.6 estimator, which overcounted tool-heavy sessions 2-3x and
+  // made our numbers disagree with what /context shows the user.
+  const beforeTokens = roughContextTokens(session);
   const beforeCost = estimateColdResumeCost(beforeTokens, model);
+  const detected = detectSessionModel(session);
+  if (detected && detected !== model.id) {
+    console.log(
+      pc.yellow(`  note: session was running ${detected}; cost shown at ${model.label} rates`),
+    );
+  }
 
   console.log();
   console.log(
@@ -414,7 +449,7 @@ async function main() {
   const after = analyze(outPath);
   printReport("After", after);
 
-  const afterTokens = estimateSessionTokens(outPath, model);
+  const afterTokens = roughContextTokens(outPath);
   const afterCost = estimateColdResumeCost(afterTokens, model);
   const savedTokens = Math.max(0, beforeTokens - afterTokens);
   const savedCost = Math.max(0, beforeCost - afterCost);

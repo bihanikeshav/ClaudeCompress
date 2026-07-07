@@ -256,7 +256,9 @@ const INPUT_WRITE_CONTENT_MAX = 500;
 
 function truncateArg(s: string, max: number): string {
   if (typeof s !== "string" || s.length <= max) return s;
-  return s.slice(0, max);
+  // Explicit marker: a silently-truncated old_string looks like a complete
+  // small edit, which is actively misleading on resume.
+  return s.slice(0, max) + "…[truncated]";
 }
 
 export function squashToolUseInput(blk: any, toolName: string | undefined): any {

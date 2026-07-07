@@ -18,9 +18,19 @@ const COMMAND_PATH = join(CLAUDE_HOME, "commands", "compress.md");
 const BREAK_COMMAND_PATH = join(CLAUDE_HOME, "commands", "break.md");
 const TTL_COMMAND_PATH = join(CLAUDE_HOME, "commands", "ttl.md");
 
-// Hook matches /compress, /break, and /ttl — the dispatcher in hook.ts
-// decides which flow to run based on the prompt content.
-const HOOK_MATCHER = "^/(compress|break|ttl)\\b";
+// Informational slash commands added in v0.17 — each is a thin stderr
+// report handled entirely by the hook (the model never sees the prompt).
+const SIMPLE_COMMAND_PATHS: Record<string, string> = {
+  savings: join(CLAUDE_HOME, "commands", "savings.md"),
+  analyze: join(CLAUDE_HOME, "commands", "analyze.md"),
+  probe: join(CLAUDE_HOME, "commands", "probe.md"),
+  diff: join(CLAUDE_HOME, "commands", "diff.md"),
+  gc: join(CLAUDE_HOME, "commands", "gc.md"),
+};
+
+// Hook matches every claudecompress slash command — the dispatcher in
+// hook.ts decides which flow to run based on the prompt content.
+export const HOOK_MATCHER = "^/(compress|break|ttl|savings|analyze|probe|diff|gc)\\b";
 const HOOK_TAG = "claudecompress hook";
 
 /**
@@ -142,14 +152,47 @@ function writeSettings(settings: any): string | null {
   return b;
 }
 
+function isOurHookEntry(h: any): boolean {
+  return (
+    Array.isArray(h?.hooks) &&
+    h.hooks.some((x: any) => x?.command?.includes(HOOK_TAG))
+  );
+}
+
 function hasExistingHook(settings: any): boolean {
   const list = settings?.hooks?.UserPromptSubmit;
   if (!Array.isArray(list)) return false;
-  return list.some(
-    (h: any) =>
-      Array.isArray(h?.hooks) &&
-      h.hooks.some((x: any) => x?.command?.includes(HOOK_TAG)),
-  );
+  return list.some(isOurHookEntry);
+}
+
+/**
+ * PreCompact archive hook: same dispatcher command as the prompt hook —
+ * hook.ts routes by hook_event_name — but registered under
+ * `hooks.PreCompact` with no matcher so it fires for both manual and
+ * auto compaction. Exported (with add/remove below) so tests can verify
+ * the settings mutations at the pure-function level.
+ */
+export function hasExistingPreCompactHook(settings: any): boolean {
+  const list = settings?.hooks?.PreCompact;
+  if (!Array.isArray(list)) return false;
+  return list.some(isOurHookEntry);
+}
+
+export function addPreCompactHook(settings: any, command: string): void {
+  settings.hooks ??= {};
+  settings.hooks.PreCompact ??= [];
+  settings.hooks.PreCompact.push({
+    // No matcher: fire on both "manual" and "auto" compaction triggers.
+    hooks: [{ type: "command", command }],
+  });
+}
+
+export function removePreCompactHook(settings: any): number {
+  const list = settings?.hooks?.PreCompact;
+  if (!Array.isArray(list)) return 0;
+  const before = list.length;
+  settings.hooks.PreCompact = list.filter((h: any) => !isOurHookEntry(h));
+  return before - settings.hooks.PreCompact.length;
 }
 
 function addHook(settings: any, command: string): void {
@@ -175,13 +218,15 @@ function removeHook(settings: any): number {
   return before - settings.hooks.UserPromptSubmit.length;
 }
 
-function writeSlashCommandFile(): void {
+// Exported so upgrade scripts can refresh command files + matcher without
+// the interactive flow.
+export function writeSlashCommandFile(): void {
   mkdirSync(dirname(COMMAND_PATH), { recursive: true });
   writeFileSync(
     COMMAND_PATH,
     `---
 description: Compress the active Claude Code session for cheaper cold /resume (handled by claudecompress hook).
-argument-hint: "[ultra|smart|focus|recency|truncate] [N]"
+argument-hint: "[lossless|safe|smart|slim] [N] [force]"
 ---
 
 Handled by the claudecompress UserPromptSubmit hook. If you are reading this
@@ -210,6 +255,25 @@ Handled by the claudecompress UserPromptSubmit hook. If you are reading this
 message it means the hook did not run — see https://github.com/bihanikeshav/ClaudeCompress
 `,
   );
+  const simpleDescriptions: Record<string, string> = {
+    savings: "Show lifetime tokens and dollars saved by claudecompress trims.",
+    analyze: "Waste report for this project's sessions — sizes, tokens, cold-resume cost.",
+    probe: "Fidelity check: how much of THIS session each trim mode would preserve.",
+    diff: "Open an HTML report of exactly what the last trim removed.",
+    gc: "Preview a batch trim of this project's cold sessions.",
+  };
+  for (const [name, path] of Object.entries(SIMPLE_COMMAND_PATHS)) {
+    writeFileSync(
+      path,
+      `---
+description: ${simpleDescriptions[name]} (handled by claudecompress hook)
+---
+
+Handled by the claudecompress UserPromptSubmit hook. If you are reading this
+message it means the hook did not run — see https://github.com/bihanikeshav/ClaudeCompress
+`,
+    );
+  }
 }
 
 // Plan step-by-step: decide what the hook change would be without writing yet,
@@ -241,6 +305,30 @@ async function planHook(settings: any): Promise<HookDecision | null> {
   return go
     ? { kind: "install", command, viaNpx }
     : { kind: "skip", reason: "skipped /compress hook (run `claudecompress install-hook` to add later)" };
+}
+
+async function planPreCompactHook(settings: any): Promise<HookDecision | null> {
+  const command = detectHookCommand();
+  const viaNpx = command.startsWith("npx");
+  if (hasExistingPreCompactHook(settings)) {
+    const reinstall = await p.confirm({
+      message:
+        "A PreCompact archive hook is already installed. Reinstall with updated command?",
+      initialValue: false,
+    });
+    if (p.isCancel(reinstall)) return null;
+    return reinstall
+      ? { kind: "reinstall", command, viaNpx }
+      : { kind: "skip", reason: "kept existing PreCompact archive hook" };
+  }
+  const go = await p.confirm({
+    message: `Archive sessions before /compact? (PreCompact hook)  ${pc.dim(`(${command})`)}`,
+    initialValue: true,
+  });
+  if (p.isCancel(go)) return null;
+  return go
+    ? { kind: "install", command, viaNpx }
+    : { kind: "skip", reason: "skipped PreCompact archive hook (run `claudecompress install-hook` to add later)" };
 }
 
 // Claude Code statusLine supports `refreshInterval` in seconds (min 1) for
@@ -321,11 +409,15 @@ export async function install(): Promise<void> {
   const hookDecision = await planHook(settings);
   if (!hookDecision) return p.cancel("Aborted.");
 
+  const preCompactDecision = await planPreCompactHook(settings);
+  if (!preCompactDecision) return p.cancel("Aborted.");
+
   const statusDecision = await planStatusline(settings);
   if (!statusDecision) return p.cancel("Aborted.");
 
   if (
     hookDecision.kind === "skip" &&
+    preCompactDecision.kind === "skip" &&
     statusDecision.kind === "skip"
   ) {
     p.log.info("Nothing to do.");
@@ -341,6 +433,13 @@ export async function install(): Promise<void> {
   ) {
     addHook(settings, hookDecision.command);
     writeSlashCommandFile();
+  }
+  if (preCompactDecision.kind === "reinstall") removePreCompactHook(settings);
+  if (
+    preCompactDecision.kind === "install" ||
+    preCompactDecision.kind === "reinstall"
+  ) {
+    addPreCompactHook(settings, preCompactDecision.command);
   }
   if (statusDecision.kind === "install") {
     settings.statusLine = {
@@ -362,6 +461,16 @@ export async function install(): Promise<void> {
     );
   } else {
     p.log.warn(hookDecision.reason);
+  }
+  if (
+    preCompactDecision.kind === "install" ||
+    preCompactDecision.kind === "reinstall"
+  ) {
+    p.log.success(
+      `Installed PreCompact archive hook${preCompactDecision.viaNpx ? pc.dim(" (via npx)") : ""} — sessions are snapshotted before /compact`,
+    );
+  } else {
+    p.log.warn(preCompactDecision.reason);
   }
   if (statusDecision.kind === "install") {
     p.log.success(
@@ -444,20 +553,48 @@ export async function installHook(): Promise<void> {
 
   const decision = await planHook(settings);
   if (!decision) return p.cancel("Aborted.");
-  if (decision.kind === "skip") {
+
+  const preCompactDecision = await planPreCompactHook(settings);
+  if (!preCompactDecision) return p.cancel("Aborted.");
+
+  if (decision.kind === "skip" && preCompactDecision.kind === "skip") {
     p.log.warn(decision.reason);
+    p.log.warn(preCompactDecision.reason);
     p.outro("Done.");
     return;
   }
 
   if (decision.kind === "reinstall") removeHook(settings);
-  addHook(settings, decision.command);
-  writeSlashCommandFile();
+  if (decision.kind === "install" || decision.kind === "reinstall") {
+    addHook(settings, decision.command);
+    writeSlashCommandFile();
+  }
+  if (preCompactDecision.kind === "reinstall") removePreCompactHook(settings);
+  if (
+    preCompactDecision.kind === "install" ||
+    preCompactDecision.kind === "reinstall"
+  ) {
+    addPreCompactHook(settings, preCompactDecision.command);
+  }
   const b = writeSettings(settings);
   if (b) p.log.info(`Backed up previous settings to ${b}`);
-  p.log.success(
-    `Installed /compress hook${decision.viaNpx ? pc.dim(" (via npx)") : ""}`,
-  );
+  if (decision.kind === "install" || decision.kind === "reinstall") {
+    p.log.success(
+      `Installed /compress hook${decision.viaNpx ? pc.dim(" (via npx)") : ""}`,
+    );
+  } else {
+    p.log.warn(decision.reason);
+  }
+  if (
+    preCompactDecision.kind === "install" ||
+    preCompactDecision.kind === "reinstall"
+  ) {
+    p.log.success(
+      `Installed PreCompact archive hook${preCompactDecision.viaNpx ? pc.dim(" (via npx)") : ""} — sessions are snapshotted before /compact`,
+    );
+  } else {
+    p.log.warn(preCompactDecision.reason);
+  }
   p.log.info("Restart Claude Code to pick it up.");
   p.outro(pc.green("Done."));
 }
@@ -478,18 +615,24 @@ export async function uninstall(): Promise<void> {
     return;
   }
   const removed = removeHook(settings);
+  const removedPreCompact = removePreCompactHook(settings);
   let removedStatusline = false;
   if (isOurStatusline(settings.statusLine?.command)) {
     delete settings.statusLine;
     removedStatusline = true;
   }
   let removedCommands = 0;
-  for (const p2 of [COMMAND_PATH, BREAK_COMMAND_PATH, TTL_COMMAND_PATH]) {
+  for (const p2 of [
+    COMMAND_PATH,
+    BREAK_COMMAND_PATH,
+    TTL_COMMAND_PATH,
+    ...Object.values(SIMPLE_COMMAND_PATHS),
+  ]) {
     try {
       if (existsSync(p2)) { unlinkSync(p2); removedCommands += 1; }
     } catch {}
   }
-  if (removed === 0 && !removedStatusline && removedCommands === 0) {
+  if (removed === 0 && removedPreCompact === 0 && !removedStatusline && removedCommands === 0) {
     p.log.info("No claudecompress hook or statusLine found.");
     return;
   }
@@ -498,6 +641,10 @@ export async function uninstall(): Promise<void> {
   if (removed > 0)
     p.log.success(
       `Removed ${removed} claudecompress hook entr${removed === 1 ? "y" : "ies"}.`,
+    );
+  if (removedPreCompact > 0)
+    p.log.success(
+      `Removed ${removedPreCompact} PreCompact archive hook entr${removedPreCompact === 1 ? "y" : "ies"}.`,
     );
   if (removedStatusline) p.log.success("Removed claudecompress statusLine.");
   if (removedCommands > 0)

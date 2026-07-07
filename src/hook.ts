@@ -9,11 +9,21 @@ import {
   openSync,
   readSync,
   closeSync,
+  copyFileSync,
+  readdirSync,
+  unlinkSync,
 } from "node:fs";
 
-import { encodeCwd } from "./paths.ts";
+import { encodeCwd, humanBytes, projectDirForCwd } from "./paths.ts";
+import { summarizeHistory, readHistory } from "./history.ts";
+import { probeSession } from "./probes.ts";
+import { resolveDiffTarget, writeDiffReport, openInBrowser } from "./diffview.ts";
+import { planGc } from "./gc.ts";
+import { analyzeProject } from "./analyzeCmd.ts";
 import { trimSession } from "./trimmer.ts";
-import { estimateSessionTokens } from "./analyzer.ts";
+import { detectSessionModel } from "./analyzer.ts";
+import { tokensFor, roughContextTokens } from "./tokenCounter.ts";
+import { recordTrim } from "./history.ts";
 import { estimateColdResumeCost, findModel, formatUSD, type ModelInfo } from "./pricing.ts";
 import { logError, logEvent } from "./errorLog.ts";
 import { readStdin } from "./stdin.ts";
@@ -26,6 +36,10 @@ interface HookInput {
   cwd?: string;
   transcript_path?: string;
   prompt?: string;
+  /** PreCompact only: what initiated the compaction. */
+  trigger?: "manual" | "auto";
+  /** PreCompact only: user-supplied /compact instructions (unused here). */
+  custom_instructions?: string;
 }
 
 
@@ -415,17 +429,41 @@ async function runCompressHook(
   // Not under ccw (or signal write failed): do the trim here and tell
   // the user how to resume manually.
   try {
-    const model = findModel("claude-opus-4-7")!;
-    const beforeTokens = estimateSessionTokens(sessionFile, model);
-    const beforeCost = estimateColdResumeCost(beforeTokens, model);
-
-    const { path: outPath } = await trimSession(sessionFile, opts);
-    const afterTokens = estimateSessionTokens(outPath, model);
-    const afterCost = estimateColdResumeCost(afterTokens, model);
+    // Same accurate path ccw uses: /context-calibrated heuristic for the
+    // headline, real count_tokens for cost, model detected from the JSONL.
+    // The old char-based estimator here disagreed with /context by 2-3x
+    // on tool-heavy sessions.
+    const tb = await tokensFor(sessionFile);
+    const trimResult = await trimSession(sessionFile, opts);
+    const outPath = trimResult.path;
+    const ta = await tokensFor(outPath);
+    const model = findModel(tb.model);
+    const cacheMode = detectCacheState(sessionFile).mode;
+    const beforeCost = estimateColdResumeCost(tb.apiCost, model, cacheMode);
+    const afterCost = estimateColdResumeCost(ta.apiCost, model, cacheMode);
     const newHash = basename(outPath, ".jsonl");
 
-    const savedTokens = Math.max(0, beforeTokens - afterTokens);
+    const savedTokens = Math.max(0, tb.apiCost - ta.apiCost);
     const savedCost = Math.max(0, beforeCost - afterCost);
+    const approxTag = tb.approx || ta.approx ? " (est)" : "";
+
+    try {
+      recordTrim({
+        timestamp: new Date().toISOString(),
+        mode: opts.mode,
+        model: model.id,
+        sourcePath: sessionFile,
+        outputPath: outPath,
+        bytesBefore: trimResult.originalBytes,
+        bytesAfter: trimResult.trimmedBytes,
+        tokensBefore: tb.apiCost,
+        tokensAfter: ta.apiCost,
+        costBefore: beforeCost,
+        costAfter: afterCost,
+      });
+    } catch (err) {
+      logError("hook.runCompressHook.recordTrim", err);
+    }
 
     const lines: string[] = [
       "",
@@ -438,9 +476,10 @@ async function runCompressHook(
       lines.push(`  note:   '${opts.renamedFrom}' was renamed to '${opts.mode}'`);
     }
     lines.push(
-      `  mode:   ${modeLabel(opts)}${opts.dropThinking ? " · drop thinking (outside last-N window)" : ""}`,
-      `  tokens: ${fmtTokens(beforeTokens)} → ${fmtTokens(afterTokens)}   (saved ≈ ${fmtTokens(savedTokens)})`,
-      `  cold $ ${formatUSD(beforeCost)} → ${formatUSD(afterCost)}   (saved ≈ ${formatUSD(savedCost)})  [Opus 4.7]`,
+      `  mode:    ${modeLabel(opts)}${opts.dropThinking ? " · drop thinking (outside last-N window)" : ""}`,
+      `  context: ${fmtTokens(tb.contextLike)} → ${fmtTokens(ta.contextLike)}   (matches /context)`,
+      `  tokens:  ${fmtTokens(tb.apiCost)} → ${fmtTokens(ta.apiCost)}   (saved ≈ ${fmtTokens(savedTokens)})${approxTag}`,
+      `  cold $  ${formatUSD(beforeCost)} → ${formatUSD(afterCost)}   (saved ≈ ${formatUSD(savedCost)})  [${model.label} · ${cacheMode} cache]`,
       `  trimmed session: ${newHash}`,
       "└─────────────────────────────────────────────────────────┘",
       "",
@@ -504,8 +543,8 @@ function runBreakHook(input: HookInput, args: { minutes: number }): void {
     let costNote = "";
     if (sessionFile) {
       try {
-        const model = findModel("claude-opus-4-7")!;
-        const tokens = estimateSessionTokens(sessionFile, model);
+        const model = findModel(detectSessionModel(sessionFile) ?? "claude-opus-4-8");
+        const tokens = roughContextTokens(sessionFile);
         const readRate = pickCacheReadRate(model);
         const perPing = (tokens / 1_000_000) * readRate;
         const total = perPing * pingsNeeded;
@@ -568,8 +607,320 @@ function runTtlHook(input: HookInput): void {
 }
 
 // ---------------------------------------------------------------------------
+// PreCompact flow — snapshot the transcript before Claude Code's native
+// summarizer replaces earlier history, so nothing is ever lost to /compact.
+// ---------------------------------------------------------------------------
+
+const ARCHIVE_MAX_FILES = 40;
+const ARCHIVE_MAX_BYTES = 500 * 1024 * 1024; // ~500 MB
+
+function defaultArchiveDir(): string {
+  return join(homedir(), ".claude", "claudecompress", "archives");
+}
+
+function archiveStamp(d: Date): string {
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}` +
+    `-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}`
+  );
+}
+
+/**
+ * Prune `dir` down to at most `maxFiles` archives and `maxBytes` total,
+ * deleting oldest-mtime first. Only *.jsonl regular files inside `dir`
+ * itself are ever considered — nothing outside the dir is touched.
+ * Returns the paths that were deleted. Exported for tests.
+ */
+export function pruneArchives(
+  dir: string,
+  maxFiles: number = ARCHIVE_MAX_FILES,
+  maxBytes: number = ARCHIVE_MAX_BYTES,
+): string[] {
+  const deleted: string[] = [];
+  let entries: { path: string; mtimeMs: number; size: number }[] = [];
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith(".jsonl")) continue;
+      const path = join(dir, name);
+      try {
+        const st = statSync(path);
+        if (!st.isFile()) continue;
+        entries.push({ path, mtimeMs: st.mtimeMs, size: st.size });
+      } catch {}
+    }
+  } catch {
+    return deleted; // dir unreadable/missing — nothing to prune
+  }
+  entries.sort((a, b) => a.mtimeMs - b.mtimeMs); // oldest first
+  let count = entries.length;
+  let total = entries.reduce((s, e) => s + e.size, 0);
+  for (const e of entries) {
+    if (count <= maxFiles && total <= maxBytes) break;
+    try {
+      unlinkSync(e.path);
+      deleted.push(e.path);
+      count -= 1;
+      total -= e.size;
+    } catch (err) {
+      logError("hook.pruneArchives", err, { path: e.path });
+    }
+  }
+  return deleted;
+}
+
+/**
+ * Copy `sessionPath` into `archiveDir` as
+ * `<first-8-of-session-id>-<YYYYMMDD-HHMMSS>.jsonl`, then prune the dir
+ * to the retention caps. The original is never mutated. Returns the
+ * archive path. Pure (no process.exit) — exported for tests, which pass
+ * explicit temp dirs and small caps.
+ */
+export function archiveSession(
+  sessionPath: string,
+  archiveDir: string,
+  opts: { sessionId?: string; now?: Date; maxFiles?: number; maxBytes?: number } = {},
+): string {
+  mkdirSync(archiveDir, { recursive: true });
+  const id =
+    (opts.sessionId && opts.sessionId.trim()) || basename(sessionPath, ".jsonl");
+  const stamp = archiveStamp(opts.now ?? new Date());
+  const stem = `${id.slice(0, 8)}-${stamp}`;
+  let target = join(archiveDir, `${stem}.jsonl`);
+  // Two compactions within the same second: suffix rather than overwrite.
+  for (let i = 1; existsSync(target); i += 1) {
+    target = join(archiveDir, `${stem}-${i}.jsonl`);
+  }
+  copyFileSync(sessionPath, target);
+  pruneArchives(
+    archiveDir,
+    opts.maxFiles ?? ARCHIVE_MAX_FILES,
+    opts.maxBytes ?? ARCHIVE_MAX_BYTES,
+  );
+  return target;
+}
+
+/**
+ * Testable core of the PreCompact hook: resolve the session file and
+ * archive it. Returns the archive path, or null if the session couldn't
+ * be located. Throws on I/O failure — the runPreCompactHook wrapper
+ * catches everything so compaction is never blocked.
+ */
+export function handlePreCompact(
+  input: HookInput,
+  archiveDir: string = defaultArchiveDir(),
+): string | null {
+  const sessionFile = resolveSessionFile(input);
+  if (!sessionFile) return null;
+  return archiveSession(sessionFile, archiveDir, { sessionId: input.session_id });
+}
+
+function runPreCompactHook(input: HookInput): void {
+  try {
+    logEvent("hook.runPreCompactHook", "precompact hook invoked", {
+      trigger: input.trigger,
+      session_id: input.session_id,
+    });
+    const archived = handlePreCompact(input);
+    if (archived) {
+      process.stderr.write(
+        `[claudecompress] archived session before compact → ${archived}\n`,
+      );
+      logEvent("hook.runPreCompactHook", "session archived", { archived });
+    } else {
+      process.stderr.write(
+        "[claudecompress] precompact: could not locate session transcript; nothing archived\n",
+      );
+    }
+  } catch (err) {
+    // Never block compaction — log and move on.
+    logError("hook.runPreCompactHook", err, {
+      session_id: input.session_id,
+      transcript_path: input.transcript_path,
+    });
+    try {
+      process.stderr.write(
+        `[claudecompress] precompact archive failed (compaction continues): ${String(
+          err instanceof Error ? err.message : err,
+        )}\n`,
+      );
+    } catch {}
+  }
+  process.exit(0); // ALWAYS allow compaction to proceed
+}
+
+// ---------------------------------------------------------------------------
 // Dispatcher
 // ---------------------------------------------------------------------------
+
+// --------------------------------------------------------------------------
+// Simple informational slash commands. Each blocks its own prompt (exit 2)
+// and reports via stderr, same pattern as /break and /ttl — the model never
+// sees these prompts, so they cost zero tokens.
+// --------------------------------------------------------------------------
+
+const SIMPLE_COMMANDS = ["savings", "analyze", "probe", "diff", "gc"] as const;
+type SimpleCommand = (typeof SIMPLE_COMMANDS)[number];
+
+export function parseSimpleCommand(prompt: string): SimpleCommand | null {
+  const m = prompt.trim().match(/^\/(savings|analyze|probe|diff|gc)\b/);
+  return m ? (m[1] as SimpleCommand) : null;
+}
+
+function hookProjectDir(input: HookInput): string {
+  // Hooks run with cwd set to the project dir, but derive from the payload
+  // when present — more robust than trusting process.cwd() (MSYS path
+  // mangling on Windows is handled the same way resolveSessionFile does it).
+  return input.cwd ? projectDirForCwd(input.cwd) : projectDirForCwd();
+}
+
+const pctStr = (f: number): string => `${Math.round(f * 1000) / 10}%`;
+
+function runSavingsHook(): void {
+  const s = summarizeHistory();
+  const lines = ["", "┌─ claudecompress savings ─────────────────────────────┐"];
+  if (s.count === 0) {
+    lines.push(
+      "  No trims recorded yet.",
+      "  Every /compress from now on is logged — savings",
+      "  accumulate here automatically.",
+    );
+  } else {
+    lines.push(
+      `  trims:         ${s.count}`,
+      `  tokens saved:  ${fmtTokens(s.tokensSaved)}  (context you didn't re-pay for)`,
+      `  cost saved:    ${formatUSD(s.costSaved)}  (cold-resume cache writes avoided)`,
+      `  disk saved:    ${humanBytes(s.bytesSaved)}  (per-resume transcript weight)`,
+    );
+  }
+  lines.push("└──────────────────────────────────────────────────────┘", "");
+  process.stderr.write(lines.join("\n"));
+  process.exit(2);
+}
+
+function runAnalyzeHook(input: HookInput): void {
+  const dir = hookProjectDir(input);
+  const rep = analyzeProject(dir);
+  const lines = ["", "┌─ claudecompress analyze ─────────────────────────────┐"];
+  if (rep.sessionCount === 0) {
+    lines.push("  No sessions found for this project.");
+  } else {
+    lines.push(
+      `  sessions: ${rep.sessionCount} · ${humanBytes(rep.totalBytes)} · ≈${fmtTokens(rep.totalTokens)} tokens`,
+      `  cache:    ${rep.cacheStates.warm} warm · ${rep.cacheStates.cold} cold · ${rep.cacheStates["very-cold"]} very-cold`,
+      "",
+      "  largest sessions:",
+    );
+    for (const s of rep.topSessions) {
+      const cost = s.coldResumeCost === null ? "?" : formatUSD(s.coldResumeCost);
+      lines.push(
+        `    ${s.sessionId.slice(0, 8)}…  ${humanBytes(s.bytes).padStart(10)}  ${s.ageLabel.padStart(9)}  cold-resume ≈ ${cost}`,
+      );
+    }
+  }
+  lines.push(
+    "└──────────────────────────────────────────────────────┘",
+    "",
+    "  Full report incl. measured per-mode savings:",
+    "    claudecompress analyze          (this project)",
+    "    claudecompress analyze --all    (every project)",
+    "",
+  );
+  process.stderr.write(lines.join("\n"));
+  process.exit(2);
+}
+
+async function runProbeHook(input: HookInput): Promise<void> {
+  const sessionFile = resolveSessionFile(input);
+  if (!sessionFile) {
+    process.stderr.write("[claudecompress] /probe: could not locate this session's file.\n");
+    process.exit(2);
+  }
+  const { origTokens, ground, rows } = await probeSession(sessionFile);
+  const lines = [
+    "",
+    "┌─ claudecompress probe · this session ────────────────────────────┐",
+    `  ${fmtTokens(origTokens)} tokens · ${ground.artifacts.length} files modified · ${ground.toolSkeleton.length} tool calls · ${ground.errorSnippets.length} errors`,
+    "",
+    "  mode       saved   files  skeleton  asks  errors",
+    "  -------------------------------------------------",
+  ];
+  for (const r of rows) {
+    lines.push(
+      `  ${r.mode.padEnd(9)}${(r.savedPct.toFixed(1) + "%").padStart(6)}  ${pctStr(r.scores.artifactRetention).padStart(6)}  ${pctStr(r.scores.toolSkeletonRetention).padStart(8)}  ${pctStr(r.scores.userAskRetention).padStart(4)}  ${pctStr(r.scores.errorRetention).padStart(6)}`,
+    );
+  }
+  lines.push("", "  verdicts:");
+  for (const r of rows) lines.push(`    ${r.mode.padEnd(9)} ${r.verdict}`);
+  lines.push(
+    "└───────────────────────────────────────────────────────────────────┘",
+    "",
+    "  Trim with the mode you trust: /compress safe · /compress slim",
+    "",
+  );
+  process.stderr.write(lines.join("\n"));
+  process.exit(2);
+}
+
+function runDiffHook(): void {
+  const resolved = resolveDiffTarget([]);
+  if ("error" in resolved) {
+    process.stderr.write(`\n[claudecompress] /diff: ${resolved.error}\n`);
+    process.exit(2);
+  }
+  if (!existsSync(resolved.originalPath) || !existsSync(resolved.trimmedPath)) {
+    process.stderr.write(
+      "\n[claudecompress] /diff: the last trim's files are no longer on disk.\n",
+    );
+    process.exit(2);
+  }
+  const { outPath, stats } = writeDiffReport(resolved.originalPath, resolved.trimmedPath);
+  openInBrowser(outPath, true);
+  process.stderr.write(
+    [
+      "",
+      "┌─ claudecompress diff ────────────────────────────────┐",
+      `  last trim: ${stats.unchanged} unchanged · ${stats.modified} modified · ${stats.dropped} dropped`,
+      `  saved:     ${humanBytes(Math.max(0, stats.bytesBefore - stats.bytesAfter))}`,
+      `  report:    ${outPath}`,
+      "└──────────────────────────────────────────────────────┘",
+      "  (opened in your browser)",
+      "",
+    ].join("\n"),
+  );
+  process.exit(2);
+}
+
+function runGcHook(input: HookInput): void {
+  const dir = hookProjectDir(input);
+  const plan = planGc(
+    [dir],
+    { mode: "safe", keepLastN: 5, minSizeBytes: 200 * 1024, minAgeMs: 24 * 3600 * 1000, dropThinking: true },
+    readHistory(),
+  );
+  const lines = ["", "┌─ claudecompress gc · preview ────────────────────────┐"];
+  if (plan.candidates.length === 0) {
+    lines.push("  Nothing to trim — no cold sessions ≥ 200 KB older than 24h.");
+  } else {
+    for (const c of plan.candidates) {
+      lines.push(
+        `  ${c.sessionId.slice(0, 8)}…  ${humanBytes(c.bytes).padStart(10)}  ${c.ageLabel.padStart(9)}  ≈${c.tokens === null ? "?" : fmtTokens(c.tokens)} tokens`,
+      );
+    }
+    lines.push(
+      "",
+      `  ${plan.candidates.length} session(s) · ${humanBytes(plan.totalBytes)} · ≈${fmtTokens(plan.totalTokens)} tokens`,
+    );
+  }
+  lines.push("└──────────────────────────────────────────────────────┘");
+  if (plan.candidates.length > 0) {
+    lines.push("", "  To execute (originals are never touched):", "    claudecompress gc --yes", "");
+  } else {
+    lines.push("");
+  }
+  process.stderr.write(lines.join("\n"));
+  process.exit(2);
+}
 
 export async function runHook(): Promise<void> {
   const logPath = join(homedir(), ".claude", "claudecompress", "hook-debug.log");
@@ -598,6 +949,15 @@ export async function runHook(): Promise<void> {
       process.exit(0);
     }
 
+    // PreCompact fires from Claude Code's compaction path, not from a user
+    // prompt — dispatch on the event name before any prompt parsing.
+    // runPreCompactHook exits 0 on every path (including errors) so a
+    // broken archive can never block compaction.
+    if (input.hook_event_name === "PreCompact") {
+      runPreCompactHook(input);
+      return;
+    }
+
     const prompt = input.prompt ?? "";
 
     const compressOpts = parseCompressArgs(prompt);
@@ -617,6 +977,13 @@ export async function runHook(): Promise<void> {
       runTtlHook(input);
       return;
     }
+
+    const simple = parseSimpleCommand(prompt);
+    if (simple === "savings") runSavingsHook();
+    else if (simple === "analyze") runAnalyzeHook(input);
+    else if (simple === "probe") await runProbeHook(input);
+    else if (simple === "diff") runDiffHook();
+    else if (simple === "gc") runGcHook(input);
 
     process.exit(0); // unknown prompt — allow through
   } catch (err) {

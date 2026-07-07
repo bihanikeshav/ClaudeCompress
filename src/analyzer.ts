@@ -144,6 +144,36 @@ export function estimateSessionTokens(path: string, model: ModelInfo): number {
   return estimateTokens(apiRelevantChars(path), model);
 }
 
+/**
+ * Detect the model the session is actually running by scanning backwards
+ * for the most recent assistant record carrying `message.model`. Returns
+ * null when no assistant record exists yet (fresh session). Callers pass
+ * the result to findModel() for pricing instead of hardcoding a model id.
+ */
+export function detectSessionModel(path: string): string | null {
+  let data: string;
+  try {
+    data = readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+  const lines = data.split("\n");
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (!line) continue;
+    let rec: any;
+    try {
+      rec = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (rec?.type !== "assistant") continue;
+    const model = rec?.message?.model;
+    if (typeof model === "string" && model.length > 0) return model;
+  }
+  return null;
+}
+
 export function summarizeSession(path: string): SessionSummary {
   const st = statSync(path);
   const sessionId = basename(path, ".jsonl");

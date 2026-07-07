@@ -41,6 +41,23 @@ Everything reads from the session JSONL Claude Code already writes. No proxy, no
 - **Interrupt detection.** Ctrl-C / ESC leaves a `[Request interrupted by user]` marker; the countdown starts from there.
 - **Polling.** Ticks every second via `refreshInterval: 1`. State cached at `~/.claude/claudecompress/statusline-cache-<sid>.json`, keyed on JSONL mtime+size.
 
+## Slash commands (the everyday interface)
+
+Everything important is a slash command inside your session — no terminal needed. All are handled by the hook (the model never sees them; they cost zero tokens):
+
+| Command | What it shows |
+|---|---|
+| `/compress [mode] [N]` | trim this session for cheap cold `/resume` |
+| `/savings` | lifetime tokens + $ saved by your trims |
+| `/probe` | fidelity check: what each mode would preserve of THIS session |
+| `/diff` | open an HTML report of what the last trim removed |
+| `/analyze` | this project's sessions — sizes, tokens, cold-resume cost |
+| `/gc` | preview a batch trim of this project's cold sessions |
+| `/ttl` | cache TTL countdown |
+| `/break [min]` | keep-cache-warm `/loop` command for a break |
+
+The `claudecompress <cmd>` CLI equivalents remain for scripting and extra flags.
+
 ## Trimming
 
 Two entry points into the same trim engine.
@@ -125,7 +142,63 @@ Lists the current project's sessions with size, cache staleness (warm/cold/very-
 claudecompress history         # lifetime trim savings
 ```
 
-Every trim is logged to `~/.claude/claudecompress/history.jsonl`. The interactive flow shows a one-liner like `Lifetime: 7 trims · saved ≈ $42.18` on launch.
+Every trim is logged to `~/.claude/claudecompress/history.jsonl`. The interactive flow shows a one-liner like `Lifetime: 7 trims · saved ≈ $42.18` on launch. Hook and `ccw` trims are recorded too.
+
+### See what a trim removed: `claudecompress diff`
+
+Trust-builder for the lossy modes — audit every byte the trimmer touched before pointing `/resume` at the trimmed file.
+
+```bash
+claudecompress diff                                # most recent trim from history
+claudecompress diff <hash>                         # trimmed session by id (prefix ok)
+claudecompress diff <original.jsonl> <trimmed.jsonl>
+```
+
+Self-contained HTML report: per-record before/after content, byte savings per tool, summary stats. Written to `~/.claude/claudecompress/diffs/` and opened in your browser.
+
+### Fleet report: `claudecompress analyze`
+
+Where your session bytes go and what a trim would save.
+
+```bash
+claudecompress analyze [--all] [--sample N] [--json]
+```
+
+Per-project session counts, sizes, estimated tokens, cache-state distribution, the 5 largest sessions with cold-resume cost, and a content-category breakdown (tool results vs thinking vs text). Then trims temp *copies* of the N largest cold sessions (default 3) in every mode to report measured savings. Read-only — nothing in your projects is touched.
+
+### Batch trim: `claudecompress gc`
+
+```bash
+claudecompress gc [--mode lossless|safe|smart|slim] [--keep-last N]
+                  [--min-size 200kb] [--min-age 24h] [--all]
+                  [--dry-run] [--yes]
+```
+
+Selects sessions ≥ min-size and older than min-age, skipping anything that's already a trim product or already has an up-to-date trimmed sibling. Prints the plan first; `--dry-run` stops there, `--yes` skips the confirmation. Originals are never modified or deleted — each trim writes a new sibling you can `claude --resume`.
+
+### Fidelity measurement: `claudecompress probe`
+
+How much of a session's ground truth survives each mode — so "% saved" becomes "% saved at X% fidelity".
+
+```bash
+claudecompress probe                     # largest session in this project
+claudecompress probe path/to/session.jsonl
+claudecompress probe --modes safe,slim --json
+claudecompress probe --llm               # + ask Haiku to recover the file list
+                                         #   & next steps from the trimmed
+                                         #   transcript (needs API creds)
+```
+
+`probe` extracts the files modified, the tool-call skeleton, your last 10 requests, and every error from the original session, re-trims it with each mode, and scores what's still recoverable. Deterministic probes run fully offline; temp trims are deleted afterwards.
+
+### PreCompact auto-archive
+
+Claude Code's `/compact` (manual or automatic) replaces earlier history with a summary — irreversibly, from the transcript's point of view. `claudecompress install` offers a **PreCompact hook** that snapshots the full session JSONL *before* compaction runs:
+
+- Archives land in `~/.claude/claudecompress/archives/` as verbatim copies.
+- Retention is automatic: at most 40 archives / ~500 MB, oldest deleted first.
+- The hook never blocks compaction — on any error it logs and lets `/compact` proceed.
+- To restore, resume the archive directly: `claude --resume <path-to-archive>`.
 
 ### `ccw`, the auto-resume wrapper
 

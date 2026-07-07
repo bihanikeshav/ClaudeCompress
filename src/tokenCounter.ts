@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { estimateSessionTokens, detectSessionModel } from "./analyzer.ts";
+import { findModel } from "./pricing.ts";
+import { logError } from "./errorLog.ts";
 
 /**
  * Real token counting via Anthropic's `/v1/messages/count_tokens` endpoint.
@@ -317,17 +320,33 @@ function normalizeContent(content: unknown): ContentBlock[] {
   }
   if (!Array.isArray(content)) return [];
   const out: ContentBlock[] = [];
-  for (const b of content) {
+  for (let b of content) {
     if (!b || typeof b !== "object") continue;
     const kind = (b as any).type;
     // `thinking` blocks are replay-only and not accepted by count_tokens
     // unless extended thinking is enabled — drop them.
     if (kind === "thinking") continue;
+    // ToolSearch results carry `tool_reference` sub-blocks that the API
+    // only accepts when the referenced tool is declared in `tools` —
+    // count_tokens gets no tools array, so it 400s ("Tool reference 'X'
+    // not found"). Replace them with an equivalent text stub.
+    if (kind === "tool_reference") {
+      out.push({ type: "text", text: `[tool: ${(b as any).tool_name ?? "?"}]` });
+      continue;
+    }
     if (kind === "tool_result") {
       // The API rejects tool_result blocks with empty content. claude-code
       // occasionally produces these (e.g. a tool that errored before
       // producing output). Substitute a placeholder so the request validates.
-      const c = (b as any).content;
+      let c = (b as any).content;
+      if (Array.isArray(c) && c.some((sb: any) => sb?.type === "tool_reference")) {
+        c = c.map((sb: any) =>
+          sb?.type === "tool_reference"
+            ? { type: "text", text: `[tool: ${sb.tool_name ?? "?"}]` }
+            : sb,
+        );
+        b = { ...(b as any), content: c };
+      }
       const empty =
         c == null ||
         (typeof c === "string" && c.length === 0) ||
@@ -363,7 +382,7 @@ interface AuthHeaders {
  *
  * Returns null if neither is available.
  */
-function resolveAuth(): AuthHeaders | null {
+export function resolveAuth(): AuthHeaders | null {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (apiKey) return { "x-api-key": apiKey };
 
@@ -425,4 +444,40 @@ export async function countTokensForSession(
   }
   const data = (await res.json()) as { input_tokens: number };
   return { inputTokens: data.input_tokens, model };
+}
+
+export interface SessionTokenCounts {
+  /** Matches what /context's "Messages" line shows (disk-side heuristic, ~1%). */
+  contextLike: number;
+  /** Real count_tokens result — the actual bill on cold /resume. */
+  apiCost: number;
+  /** true when count_tokens failed and apiCost fell back to the char estimator. */
+  approx: boolean;
+  /** Model id used for counting/pricing (detected from the JSONL). */
+  model: string;
+}
+
+/**
+ * Shared token resolution for hook, ccw, and CLI: the /context-calibrated
+ * heuristic as the headline number plus the real count_tokens result for
+ * cost, priced against the model the session is actually running (detected
+ * from the JSONL — never hardcoded). Falls back to the char estimator when
+ * the API is unreachable, flagged via `approx`.
+ */
+export async function tokensFor(path: string): Promise<SessionTokenCounts> {
+  const contextLike = roughContextTokens(path);
+  const detected = detectSessionModel(path);
+  try {
+    const r = await countTokensForSession(path, detected ?? undefined);
+    return { contextLike, apiCost: r.inputTokens, approx: false, model: r.model };
+  } catch (err) {
+    logError("tokenCounter.tokensFor.countTokens", err, { path });
+    const model = findModel(detected ?? "claude-opus-4-8");
+    return {
+      contextLike,
+      apiCost: estimateSessionTokens(path, model),
+      approx: true,
+      model: model.id,
+    };
+  }
 }

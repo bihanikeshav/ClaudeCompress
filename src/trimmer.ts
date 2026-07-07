@@ -6,7 +6,24 @@ import type { TrimOptions, TrimResult } from "./types.ts";
 import { squashToolResult, squashToolUseInput } from "./squash.ts";
 import { isUserTextTurn } from "./records.ts";
 
-const REDACT_PLACEHOLDER = "";
+/**
+ * Masked tool_results get the SAME elision string claude-code's own
+ * microcompact writes ("[Read output elided]"). The model has seen this
+ * exact format in production constantly, so it can't teach a bad pattern
+ * the way a novel "[redacted by claudecompress]" marker could — and it
+ * avoids the empty-content shape the Messages API rejects.
+ */
+function elisionMarker(toolName: string | undefined): string {
+  return toolName ? `[${toolName} output elided]` : "[output elided]";
+}
+
+/**
+ * Appended wherever we hard-truncate a string (tool inputs, banded
+ * truncation). Without it a truncated old_string looks like a complete
+ * small edit — actively misleading on resume. Deterministic/byte-stable
+ * so repeated trims of the same content re-cache identically.
+ */
+const TRUNCATION_MARKER = "…[truncated]";
 
 // Any string matching this pattern is an old trim marker. When we re-trim
 // a session that was already trimmed, we strip the old marker before
@@ -31,24 +48,32 @@ function stripOldMarker(s: string): string {
   return out;
 }
 
-function redactToolResult(blk: any): any {
-  const out: Record<string, unknown> = {
+function redactToolResult(blk: any, toolName: string | undefined): any {
+  // Error outputs are exempt from masking: failed tool calls carry
+  // debugging state the model needs on continuation (arXiv 2606.00408
+  // found masking errors hurts adaptive debugging). The universal squash
+  // pass still bounds their size.
+  if (blk.is_error) return blk;
+  return {
     type: "tool_result",
     tool_use_id: blk.tool_use_id,
-    content: REDACT_PLACEHOLDER,
+    content: elisionMarker(toolName),
   };
-  if (blk.is_error) out.is_error = true;
-  return out;
 }
 
-function trimRecordRedact(rec: any, newSid: string): any | null {
+function trimRecordRedact(
+  rec: any,
+  newSid: string,
+  toolUseNames: Map<string, string>,
+): any | null {
   const out = { ...rec };
   if ("sessionId" in out) out.sessionId = newSid;
   const msg = out.message;
   if (msg && typeof msg === "object" && Array.isArray(msg.content)) {
     const newContent = msg.content.map((blk: any) => {
       if (!blk || typeof blk !== "object") return blk;
-      if (blk.type === "tool_result") return redactToolResult(blk);
+      if (blk.type === "tool_result")
+        return redactToolResult(blk, toolUseNames.get(blk.tool_use_id));
       if (blk.type === "image") return null;
       return blk;
     }).filter(Boolean);
@@ -116,25 +141,44 @@ function classifyToolResult(toolName: string | undefined): ComponentKey {
   return "tool_result_other";
 }
 
-function applyBandAction(blk: any, action: BandAction): any | null {
+function applyBandAction(
+  blk: any,
+  action: BandAction,
+  toolName?: string,
+): any | null {
   if (action.kind === "keep") return blk;
-  if (action.kind === "drop") return null;
+  if (action.kind === "drop") {
+    // tool_result blocks must NEVER be removed while their tool_use
+    // skeleton stays — that leaves positionally unpaired tool calls the
+    // API rejects on resume. "Drop" for a tool_result means "elide the
+    // body, keep the pairing".
+    if (blk.type === "tool_result") {
+      return {
+        type: "tool_result",
+        tool_use_id: blk.tool_use_id,
+        content: elisionMarker(toolName),
+      };
+    }
+    return null;
+  }
   const n = action.chars;
+  const cut = (s: string) =>
+    s.length <= n ? s : s.slice(0, n) + TRUNCATION_MARKER;
   if (blk.type === "text" && typeof blk.text === "string") {
-    return blk.text.length <= n ? blk : { ...blk, text: blk.text.slice(0, n) };
+    return blk.text.length <= n ? blk : { ...blk, text: cut(blk.text) };
   }
   if (blk.type === "thinking" && typeof blk.thinking === "string") {
-    return blk.thinking.length <= n ? blk : { ...blk, thinking: blk.thinking.slice(0, n) };
+    return blk.thinking.length <= n ? blk : { ...blk, thinking: cut(blk.thinking) };
   }
   if (blk.type === "tool_result") {
     const c = blk.content;
     if (typeof c === "string") {
-      return c.length <= n ? blk : { ...blk, content: c.slice(0, n) };
+      return c.length <= n ? blk : { ...blk, content: cut(c) };
     }
     if (Array.isArray(c)) {
       const trimmed = c.map((b: any) => {
         if (b?.type === "text" && typeof b.text === "string") {
-          return b.text.length <= n ? b : { ...b, text: b.text.slice(0, n) };
+          return b.text.length <= n ? b : { ...b, text: cut(b.text) };
         }
         if (b?.type === "image") return null;
         return b;
@@ -188,14 +232,21 @@ function trimRecordBanded(
     for (const blk of msg.content) {
       if (!blk || typeof blk !== "object") { newContent.push(blk); continue; }
       let key: ComponentKey;
+      let toolName: string | undefined;
       if (blk.type === "text") key = isUser ? "user_text" : "assistant_text";
       else if (blk.type === "thinking") key = "thinking";
       else if (blk.type === "tool_use") key = "tool_use";
-      else if (blk.type === "tool_result") key = classifyToolResult(toolUseNames.get(blk.tool_use_id));
+      else if (blk.type === "tool_result") {
+        // Error outputs survive banding untouched — failed calls carry
+        // debugging state; the universal squash still bounds their size.
+        if (blk.is_error) { newContent.push(blk); continue; }
+        toolName = toolUseNames.get(blk.tool_use_id);
+        key = classifyToolResult(toolName);
+      }
       else if (blk.type === "image") continue; // always drop
       else { newContent.push(blk); continue; }
       const action = rules[key][band];
-      const applied = applyBandAction(blk, action);
+      const applied = applyBandAction(blk, action, toolName);
       if (applied !== null) newContent.push(applied);
     }
     if (newContent.length === 0) return null;
@@ -311,7 +362,10 @@ export async function trimSession(
   const lines: string[] = [];
   const userTurnAtRecord: number[] = [];
   const latestReadIdByPath = new Map<string, string>();
+  const readRecIdxById = new Map<string, number>();
+  const lastWriteIdxByPath = new Map<string, number>();
   let latestTodoWriteId: string | null = null;
+  const WRITE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
   {
     const rl = createInterface({
       input: createReadStream(inputPath, { encoding: "utf8" }),
@@ -333,6 +387,13 @@ export async function trimSession(
               if (blk.input) toolUseInputs.set(blk.id, blk.input);
               if (blk.name === "Read" && typeof blk.input?.file_path === "string") {
                 latestReadIdByPath.set(blk.input.file_path, blk.id);
+                readRecIdxById.set(blk.id, recIdx);
+              }
+              // Track the last write per path: a Read result is expired
+              // the moment a later Edit/Write touches the same file
+              // ("expired info" — the strongest drop signal per AgentDiet).
+              if (WRITE_TOOLS.has(blk.name) && typeof blk.input?.file_path === "string") {
+                lastWriteIdxByPath.set(blk.input.file_path, recIdx);
               }
               if (blk.name === "TodoWrite") {
                 latestTodoWriteId = blk.id;
@@ -355,7 +416,12 @@ export async function trimSession(
     if (name === "Read") {
       const fp = toolUseInputs.get(tool_use_id)?.file_path;
       if (typeof fp !== "string") return false;
-      return latestReadIdByPath.get(fp) !== tool_use_id;
+      if (latestReadIdByPath.get(fp) !== tool_use_id) return true;
+      // Even the latest Read is expired if a later Edit/Write changed
+      // the file — the model would need to re-Read anyway.
+      const readIdx = readRecIdxById.get(tool_use_id);
+      const writeIdx = lastWriteIdxByPath.get(fp);
+      return readIdx !== undefined && writeIdx !== undefined && writeIdx > readIdx;
     }
     if (name === "TodoWrite") {
       return latestTodoWriteId !== tool_use_id;
@@ -417,7 +483,7 @@ export async function trimSession(
     } else if (opts.mode === "safe") {
       newRec = inRecent
         ? { ...rec, ...(rec.sessionId ? { sessionId: newSid } : {}) }
-        : trimRecordRedact(rec, newSid);
+        : trimRecordRedact(rec, newSid, toolUseNames);
       if (!newRec) continue;
     } else if (opts.mode === "smart") {
       const band: 0 | 1 | 2 =
@@ -458,11 +524,12 @@ export async function trimSession(
       const squashed = newRec.message.content.map((blk: any) => {
         if (blk?.type === "tool_result") {
           // Dedup: if this tool_result is from a Read or TodoWrite that
-          // was superseded later in the session, empty its body. The
-          // tool_use block stays as breadcrumb; the LATEST Read/Todo
-          // for the same path keeps its result.
-          if (blk.tool_use_id && isSupersededTool(blk.tool_use_id)) {
-            return { ...blk, content: "" };
+          // was superseded later in the session (a newer Read of the same
+          // path, a later Edit/Write to it, or a newer Todo state), elide
+          // its body. The tool_use block stays as breadcrumb; error
+          // results are exempt (debugging state).
+          if (blk.tool_use_id && !blk.is_error && isSupersededTool(blk.tool_use_id)) {
+            return { ...blk, content: elisionMarker(toolUseNames.get(blk.tool_use_id)) };
           }
           const toolName = toolUseNames.get(blk.tool_use_id);
           const toolInput = toolUseInputs.get(blk.tool_use_id);
@@ -486,7 +553,7 @@ export async function trimSession(
         ) {
           const t = blk.text;
           if (typeof t === "string" && t.length > 400) {
-            return { ...blk, text: t.slice(0, 400) };
+            return { ...blk, text: t.slice(0, 400) + TRUNCATION_MARKER };
           }
         }
         return blk;
