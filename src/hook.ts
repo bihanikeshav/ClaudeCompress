@@ -324,6 +324,24 @@ interface PendingTrimSignal {
 // /compress flow
 // ---------------------------------------------------------------------------
 
+/**
+ * Detects which Claude Code surface the hook is running under, so the
+ * compress banner can give resume instructions that actually apply.
+ *
+ * Reads the unofficial `CLAUDE_CODE_ENTRYPOINT` env var. It isn't part of
+ * any documented API and could change or disappear in a future release, so
+ * any value we don't recognize (including it being unset) falls back to
+ * "cli" — the terminal is the only surface where the plain `claude --resume`
+ * instructions are guaranteed to be correct, and it's also the original/most
+ * common surface this hook was written for.
+ */
+export function detectSurface(): "cli" | "vscode" | "desktop" {
+  const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT;
+  if (entrypoint === "claude-vscode") return "vscode";
+  if (entrypoint === "claude-desktop") return "desktop";
+  return "cli";
+}
+
 async function runCompressHook(
   input: HookInput,
   opts: TrimOptions & { force?: boolean; legacyMode?: string; renamedFrom?: string },
@@ -483,11 +501,28 @@ async function runCompressHook(
       `  trimmed session: ${newHash}`,
       "└─────────────────────────────────────────────────────────┘",
       "",
-      "  Exit this session (Ctrl+C twice) and run one of:",
-      `    claude --resume ${newHash}`,
-      `    claude --resume ${newHash} --dangerously-skip-permissions`,
-      "",
     );
+    const surface = detectSurface();
+    if (surface === "vscode") {
+      lines.push(
+        "  Open a terminal and run:  claude --resume " + newHash,
+        "  (or pick the trimmed session from the extension's session list)",
+        "",
+      );
+    } else if (surface === "desktop") {
+      lines.push(
+        "  The desktop app can't resume trimmed sessions from its sidebar.",
+        "  Open a terminal and run:  claude --resume " + newHash,
+        "",
+      );
+    } else {
+      lines.push(
+        "  Exit this session (Ctrl+C twice) and run one of:",
+        `    claude --resume ${newHash}`,
+        `    claude --resume ${newHash} --dangerously-skip-permissions`,
+        "",
+      );
+    }
     process.stderr.write(lines.join("\n"));
     process.exit(2);
   } catch (err) {

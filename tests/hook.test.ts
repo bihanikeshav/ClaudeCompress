@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { detectCacheState, parseCompressArgs, parseTtlArgs } from "../src/hook.ts";
+import { detectCacheState, detectSurface, parseCompressArgs, parseTtlArgs } from "../src/hook.ts";
 import {
   makeTmpDir,
   userTextRecord,
@@ -285,5 +285,53 @@ describe("parseTtlArgs", () => {
 
   test("rejects /ttlsomething (word boundary)", () => {
     expect(parseTtlArgs("/ttlsomething")).toBeNull();
+  });
+});
+
+describe("detectSurface", () => {
+  const ENV_KEY = "CLAUDE_CODE_ENTRYPOINT";
+  let original: string | undefined;
+
+  const setEnv = (value: string | undefined) => {
+    if (value === undefined) {
+      delete process.env[ENV_KEY];
+    } else {
+      process.env[ENV_KEY] = value;
+    }
+  };
+
+  test("maps claude-vscode to vscode", () => {
+    original = process.env[ENV_KEY];
+    setEnv("claude-vscode");
+    expect(detectSurface()).toBe("vscode");
+    setEnv(original);
+  });
+
+  test("maps claude-desktop to desktop", () => {
+    original = process.env[ENV_KEY];
+    setEnv("claude-desktop");
+    expect(detectSurface()).toBe("desktop");
+    setEnv(original);
+  });
+
+  test("maps cli to cli", () => {
+    original = process.env[ENV_KEY];
+    setEnv("cli");
+    expect(detectSurface()).toBe("cli");
+    setEnv(original);
+  });
+
+  test("falls back to cli when unset", () => {
+    original = process.env[ENV_KEY];
+    setEnv(undefined);
+    expect(detectSurface()).toBe("cli");
+    setEnv(original);
+  });
+
+  test("falls back to cli for unrecognized values", () => {
+    original = process.env[ENV_KEY];
+    setEnv("some-future-surface");
+    expect(detectSurface()).toBe("cli");
+    setEnv(original);
   });
 });
